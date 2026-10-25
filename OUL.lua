@@ -336,9 +336,10 @@ local ESPColors = {
 }
 
 -- Saving ---------------------------------------------------------------------------
--- With the OULSaveServer script in the game, your choices (switches, sliders, colours
--- and keybinds) are loaded here once at start-up, before the menu is built, and saved
--- again about a second after anything changes. Without that script nothing is saved.
+-- Your choices (switches, sliders, colours and keybinds) are loaded here once at start-up,
+-- before the menu is built, and saved again about a second after anything changes.
+-- With an executor they go in a local file; in a normal game they go through the
+-- OULSaveServer script into a DataStore (without that script nothing is saved).
 local FOVColor = Color3.fromRGB(255, 255, 255) -- colour of the FOV circle
 local persistOK = false -- true once the server has loaded this player's data
 local saveStatusText = "saving: connecting..." -- shown in Settings > General
@@ -452,74 +453,49 @@ local function applySaved(d)
 	end
 end
 
-local saveRemote = ReplicatedStorage:FindFirstChild("OULSaveSettings")
-local loadFn = ReplicatedStorage:WaitForChild("OULLoadSettings", 3)
-saveRemote = saveRemote or ReplicatedStorage:WaitForChild("OULSaveSettings", 1)
-local statusRemote = ReplicatedStorage:FindFirstChild("OULSaveStatus") or ReplicatedStorage:WaitForChild("OULSaveStatus", 1)
-
 local function setStatus(text)
 	saveStatusText = text
 	if saveStatusLabel then saveStatusLabel.Text = text end
 end
 
+-- Two ways to save, picked automatically:
+--   1. Executor file functions (readfile / writefile), if they exist: your settings go
+--      in a local file named after your user id, so no server script is needed.
+--   2. Otherwise the OULSaveServer script and a DataStore (needs the game to have it).
+local hasFiles = type(readfile) == "function" and type(writefile) == "function"
+local FILE_NAME = "OULMenu_" .. tostring(LocalPlayer.UserId) .. ".json"
+
 local manualPending = false -- a "Save now" press is waiting for the server's answer
 
-if loadFn and saveRemote then
-	local result, done = nil, false
-	task.spawn(function()
-		local ok, res = pcall(function()
-			return loadFn:InvokeServer()
+if hasFiles then
+	-- load
+	local okRead, content = pcall(readfile, FILE_NAME)
+	if okRead and type(content) == "string" and content ~= "" then
+		local okDecode, data = pcall(function()
+			return HttpService:JSONDecode(content)
 		end)
-		if ok then result = res end
-		done = true
-	end)
-	local waited = os.clock()
-	while not done and os.clock() - waited < 10 do
-		task.wait()
-	end
-
-	if type(result) == "table" and result.loaded then
-		persistOK = true
-		setStatus("saving: on")
-		if type(result.data) == "table" then
-			local ok, err = pcall(applySaved, result.data)
-			if not ok then warn("[OUL save] could not apply saved settings: " .. tostring(err)) end
+		if okDecode and type(data) == "table" then
+			local okApply, err = pcall(applySaved, data)
+			if not okApply then warn("[OUL save] could not apply the saved file: " .. tostring(err)) end
 		end
-	elseif type(result) == "table" then
-		setStatus("saving off: load failed")
-		warn("[OUL save] the server could not load your data, so saving is off: " .. tostring(result.reason))
-	else
-		setStatus("saving off: no reply")
-		warn("[OUL save] the server did not answer in time, so saving is off")
 	end
-else
-	setStatus("saving off: no server script")
-	warn("[OUL save] OULSaveServer not found in ReplicatedStorage/ServerScriptService, so your settings will not be saved")
-end
+	persistOK = true
+	setStatus("saving: local file")
 
-if persistOK then
-	-- the server tells us whether each write worked
-	if statusRemote then
-		track(statusRemote.OnClientEvent:Connect(function(ok, msg)
-			if ok then
-				setStatus("saved")
-			else
-				setStatus("save failed (see Output)")
-				warn("[OUL save] " .. tostring(msg))
-			end
-			if manualPending then
-				manualPending = false
-				if toast then toast(ok and "Settings saved" or "Save failed - see Output") end
-			end
-		end))
+	local function writeNow()
+		local okEnc, enc = pcall(function()
+			return HttpService:JSONEncode(takeSnapshot())
+		end)
+		if not okEnc then return false, enc end
+		local okWrite, err = pcall(writefile, FILE_NAME, enc)
+		return okWrite, err, enc
 	end
 
 	saveNowFn = function()
-		manualPending = true
-		setStatus("saving...")
-		pcall(function()
-			saveRemote:FireServer(takeSnapshot(), true)
-		end)
+		local ok, err = writeNow()
+		setStatus(ok and "saved to file" or "save failed (see Output)")
+		if not ok then warn("[OUL save] " .. tostring(err)) end
+		if toast then toast(ok and "Settings saved" or "Save failed - see Output") end
 	end
 
 	local lastSaved = HttpService:JSONEncode(takeSnapshot())
@@ -527,21 +503,102 @@ if persistOK then
 		while alive do
 			task.wait(1)
 			if not alive then break end
-			local ok, enc = pcall(function()
+			local okEnc, enc = pcall(function()
 				return HttpService:JSONEncode(takeSnapshot())
 			end)
-			if ok and enc ~= lastSaved then
+			if okEnc and enc ~= lastSaved then
 				lastSaved = enc
-				setStatus("saving...")
-				pcall(function()
-					saveRemote:FireServer(takeSnapshot())
-				end)
+				local ok, err = pcall(writefile, FILE_NAME, enc)
+				setStatus(ok and "saved to file" or "save failed (see Output)")
+				if not ok then warn("[OUL save] " .. tostring(err)) end
 			end
 		end
 	end)
 else
-	saveNowFn = function()
-		if toast then toast("Saving is off - see the status line") end
+	local saveRemote = ReplicatedStorage:FindFirstChild("OULSaveSettings")
+	local loadFn = ReplicatedStorage:WaitForChild("OULLoadSettings", 3)
+	saveRemote = saveRemote or ReplicatedStorage:WaitForChild("OULSaveSettings", 1)
+	local statusRemote = ReplicatedStorage:FindFirstChild("OULSaveStatus") or ReplicatedStorage:WaitForChild("OULSaveStatus", 1)
+
+	if loadFn and saveRemote then
+		local result, done = nil, false
+		task.spawn(function()
+			local ok, res = pcall(function()
+				return loadFn:InvokeServer()
+			end)
+			if ok then result = res end
+			done = true
+		end)
+		local waited = os.clock()
+		while not done and os.clock() - waited < 10 do
+			task.wait()
+		end
+
+		if type(result) == "table" and result.loaded then
+			persistOK = true
+			setStatus("saving: on")
+			if type(result.data) == "table" then
+				local ok, err = pcall(applySaved, result.data)
+				if not ok then warn("[OUL save] could not apply saved settings: " .. tostring(err)) end
+			end
+		elseif type(result) == "table" then
+			setStatus("saving off: load failed")
+			warn("[OUL save] the server could not load your data, so saving is off: " .. tostring(result.reason))
+		else
+			setStatus("saving off: no reply")
+			warn("[OUL save] the server did not answer in time, so saving is off")
+		end
+	else
+		setStatus("saving off: no server script")
+		warn("[OUL save] OULSaveServer not found in ReplicatedStorage/ServerScriptService, so your settings will not be saved")
+	end
+
+	if persistOK then
+		-- the server tells us whether each write worked
+		if statusRemote then
+			track(statusRemote.OnClientEvent:Connect(function(ok, msg)
+				if ok then
+					setStatus("saved")
+				else
+					setStatus("save failed (see Output)")
+					warn("[OUL save] " .. tostring(msg))
+				end
+				if manualPending then
+					manualPending = false
+					if toast then toast(ok and "Settings saved" or "Save failed - see Output") end
+				end
+			end))
+		end
+
+		saveNowFn = function()
+			manualPending = true
+			setStatus("saving...")
+			pcall(function()
+				saveRemote:FireServer(takeSnapshot(), true)
+			end)
+		end
+
+		local lastSaved = HttpService:JSONEncode(takeSnapshot())
+		task.spawn(function()
+			while alive do
+				task.wait(1)
+				if not alive then break end
+				local ok, enc = pcall(function()
+					return HttpService:JSONEncode(takeSnapshot())
+				end)
+				if ok and enc ~= lastSaved then
+					lastSaved = enc
+					setStatus("saving...")
+					pcall(function()
+						saveRemote:FireServer(takeSnapshot())
+					end)
+				end
+			end
+		end)
+	else
+		saveNowFn = function()
+			if toast then toast("Saving is off - see the status line") end
+		end
 	end
 end
 end -- saving
