@@ -142,8 +142,9 @@ local Settings = {
 	Smoothness = 1,
 	Triggerbot = false,
 	TriggerDelay = 50,
-	ESP = false,
-	Chams = false,
+	TriggerOnClick = false, -- only auto-shoot while left click is held
+	ESP = true,
+	Chams = true,
 	BlurEnabled = true,
 	BlurAmount = 18,
 	ShowNames = false,
@@ -152,7 +153,7 @@ local Settings = {
 	BoxFill = false,
 	WallCheck = true,
 	Watermark = true,
-	ShowFOV = false,
+	ShowFOV = true,
 	AimPart = "Head",
 	UITransparency = 0,
 	Fly = false,
@@ -283,13 +284,13 @@ local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local SAVE_BOOLS = {
-	"Enabled", "Triggerbot", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
+	"Enabled", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
 	"Boxes", "BoxFill", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed",
 	"InfiniteJump", "Notifications",
 }
 local SAVE_NUMBERS = {
 	FOV = { 20, 500 }, Smoothness = { 1, 100 }, TriggerDelay = { 0, 300 },
-	BlurAmount = { 1, 56 }, UITransparency = { 0, 70 }, FlySpeed = { 5, 250 },
+	BlurAmount = { 1, 56 }, UITransparency = { 0, 70 }, FlySpeed = { 5, 1000 },
 	VortexSpeed = { 1, 20 }, VortexRadius = { 2, 14 }, SpeedValue = { 16, 250 },
 }
 local SAVE_THEME = { "Text", "Switch", "Accent", "Background", "Outline" }
@@ -1925,6 +1926,7 @@ do
 	local t = newGroup(trigPage, 1, "Triggerbot")
 	addCheckbox(t, "Enabled", "Triggerbot")
 	addSlider(t, "Delay (ms)", 0, 300, "TriggerDelay")
+	addCheckbox(t, "Left click only", "TriggerOnClick")
 
 	local info = newGroup(trigPage, 2, "Info")
 	addHint(addNote(info, ""), function()
@@ -1995,7 +1997,7 @@ local flyPage = newPage("movement_fly", true)
 do
 	local g = newGroup(flyPage, 1, "Fly")
 	addCheckbox(g, "Enabled", "Fly")
-	addSlider(g, "Speed", 5, 250, "FlySpeed")
+	addSlider(g, "Speed", 5, 1000, "FlySpeed")
 
 	local k = newGroup(flyPage, 2, "Controls")
 	addNote(k, "W A S D  -  move")
@@ -2297,6 +2299,31 @@ end
 local triggerSeenAt = nil
 local lastShot = 0
 
+-- tracks the REAL left mouse button; clicks the script sends itself are ignored
+local leftHeld = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+local synth = { began = 0, ended = 0, expires = 0 }
+local function markSynthetic()
+	synth.began += 1
+	synth.ended += 1
+	synth.expires = os.clock() + 0.25
+end
+track(UserInputService.InputBegan:Connect(function(input)
+	if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+	if synth.began > 0 and os.clock() < synth.expires then
+		synth.began -= 1
+	else
+		leftHeld = true
+	end
+end))
+track(UserInputService.InputEnded:Connect(function(input)
+	if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+	if synth.ended > 0 and os.clock() < synth.expires then
+		synth.ended -= 1
+	else
+		leftHeld = false
+	end
+end))
+
 local function playerUnderCrosshair()
 	local cam = workspace.CurrentCamera
 	local m = UserInputService:GetMouseLocation()
@@ -2319,6 +2346,7 @@ local function playerUnderCrosshair()
 end
 
 local function fireClick()
+	markSynthetic()
 	if mouse1click then
 		if pcall(mouse1click) then return end
 	end
@@ -2341,6 +2369,11 @@ end
 track(RunService.Heartbeat:Connect(function()
 	local mouseLocked = UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
 	if not Settings.Triggerbot or menuOpen or not mouseLocked or UserInputService:GetFocusedTextBox() then
+		triggerSeenAt = nil
+		return
+	end
+
+	if Settings.TriggerOnClick and not leftHeld then
 		triggerSeenAt = nil
 		return
 	end
