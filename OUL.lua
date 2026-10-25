@@ -334,6 +334,170 @@ local ESPColors = {
 	Box = Color3.fromRGB(255, 255, 255),     -- box outline
 	BoxFill = Color3.fromRGB(255, 70, 70),   -- box fill
 }
+
+-- Saving ---------------------------------------------------------------------------
+-- With the OULSaveServer script in the game, your choices (switches, sliders, colours
+-- and keybinds) are loaded here once at start-up, before the menu is built, and saved
+-- again about a second after anything changes. Without that script nothing is saved.
+local FOVColor = Color3.fromRGB(255, 255, 255) -- colour of the FOV circle
+local persistOK = false -- true once the server has loaded this player's data
+
+-- (everything else lives in a do-block to keep the script under Luau's 200-locals limit)
+do
+local HttpService = game:GetService("HttpService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local SAVE_BOOLS = {
+	"Enabled", "Triggerbot", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
+	"Boxes", "BoxFill", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed",
+	"InfiniteJump", "Notifications",
+}
+local SAVE_NUMBERS = {
+	FOV = { 20, 500 }, Smoothness = { 1, 100 }, TriggerDelay = { 0, 300 },
+	BlurAmount = { 1, 56 }, UITransparency = { 0, 70 }, FlySpeed = { 5, 250 },
+	VortexSpeed = { 1, 20 }, VortexRadius = { 2, 14 }, SpeedValue = { 16, 250 },
+}
+local SAVE_THEME = { "Text", "Switch", "Accent", "Background", "Outline" }
+local SAVE_ESP = { "Fill", "Outline", "Tracer", "Name", "Box", "BoxFill" }
+
+local function colorToArr(c)
+	return { math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5) }
+end
+
+local function arrToColor(a)
+	if type(a) == "table" and type(a[1]) == "number" and type(a[2]) == "number" and type(a[3]) == "number" then
+		return Color3.fromRGB(math.clamp(a[1], 0, 255), math.clamp(a[2], 0, 255), math.clamp(a[3], 0, 255))
+	end
+end
+
+-- "" = no key, "K:<KeyCode name>", "M:MouseButton2" / "M:MouseButton3"
+local function inputToString(i)
+	if not i then return "" end
+	if i.EnumType == Enum.KeyCode then return "K:" .. i.Name end
+	return "M:" .. i.Name
+end
+
+local function stringToInput(str)
+	if type(str) ~= "string" or #str < 3 then return nil end
+	local kind, name = str:sub(1, 1), str:sub(3)
+	if kind == "K" then
+		local ok, v = pcall(function() return Enum.KeyCode[name] end)
+		if ok then return v end
+	elseif kind == "M" and (name == "MouseButton2" or name == "MouseButton3") then
+		return Enum.UserInputType[name]
+	end
+	return nil
+end
+
+local function takeSnapshot()
+	local snap = { v = 1, settings = {}, theme = {}, esp = {}, binds = {} }
+	for _, k in ipairs(SAVE_BOOLS) do
+		snap.settings[k] = Settings[k] and true or false
+	end
+	for k in pairs(SAVE_NUMBERS) do
+		snap.settings[k] = Settings[k]
+	end
+	snap.settings.AimPart = Settings.AimPart
+	for _, k in ipairs(SAVE_THEME) do
+		snap.theme[k] = colorToArr(Theme[k])
+	end
+	for _, k in ipairs(SAVE_ESP) do
+		snap.esp[k] = colorToArr(ESPColors[k])
+	end
+	snap.fov = colorToArr(FOVColor)
+	for _, b in ipairs(Binds) do
+		snap.binds[b.id] = inputToString(b.input)
+	end
+	return snap
+end
+
+local function applySaved(d)
+	local s = type(d.settings) == "table" and d.settings or {}
+	for _, k in ipairs(SAVE_BOOLS) do
+		if type(s[k]) == "boolean" then Settings[k] = s[k] end
+	end
+	for k, range in pairs(SAVE_NUMBERS) do
+		if type(s[k]) == "number" and s[k] == s[k] then
+			Settings[k] = math.clamp(math.floor(s[k] + 0.5), range[1], range[2])
+		end
+	end
+	if s.AimPart == "Head" or s.AimPart == "Body" then Settings.AimPart = s.AimPart end
+
+	local t = type(d.theme) == "table" and d.theme or {}
+	for _, k in ipairs(SAVE_THEME) do
+		local c = arrToColor(t[k])
+		if c then Theme[k] = c end
+	end
+	deriveTheme()
+
+	local e = type(d.esp) == "table" and d.esp or {}
+	for _, k in ipairs(SAVE_ESP) do
+		local c = arrToColor(e[k])
+		if c then ESPColors[k] = c end
+	end
+	FOVColor = arrToColor(d.fov) or FOVColor
+
+	local b = type(d.binds) == "table" and d.binds or {}
+	for _, bind in ipairs(Binds) do
+		local v = b[bind.id]
+		if v == "" then
+			if bind.kind ~= "menu" then bind.input = nil end -- the menu key can't be cleared
+		elseif v ~= nil then
+			local inp = stringToInput(v)
+			if inp then bind.input = inp end
+		end
+	end
+end
+
+local saveRemote = ReplicatedStorage:FindFirstChild("OULSaveSettings")
+local loadFn = ReplicatedStorage:WaitForChild("OULLoadSettings", 3)
+saveRemote = saveRemote or ReplicatedStorage:WaitForChild("OULSaveSettings", 1)
+
+if loadFn and saveRemote then
+	local result, done = nil, false
+	task.spawn(function()
+		local ok, res = pcall(function()
+			return loadFn:InvokeServer()
+		end)
+		if ok then result = res end
+		done = true
+	end)
+	local waited = os.clock()
+	while not done and os.clock() - waited < 10 do
+		task.wait()
+	end
+
+	if type(result) == "table" and result.loaded then
+		persistOK = true
+		if type(result.data) == "table" then
+			local ok, err = pcall(applySaved, result.data)
+			if not ok then warn("[OUL save] could not apply saved settings: " .. tostring(err)) end
+		end
+	end
+else
+	warn("[OUL save] OULSaveServer not found, so your settings will not be saved")
+end
+
+if persistOK then
+	local lastSaved = HttpService:JSONEncode(takeSnapshot())
+	task.spawn(function()
+		while alive do
+			task.wait(1)
+			if not alive then break end
+			local ok, enc = pcall(function()
+				return HttpService:JSONEncode(takeSnapshot())
+			end)
+			if ok and enc ~= lastSaved then
+				lastSaved = enc
+				pcall(function()
+					saveRemote:FireServer(takeSnapshot())
+				end)
+			end
+		end
+	end)
+end
+end -- saving
+
 -- holds the username tags (local only, outside the characters)
 local espFolder = Instance.new("Folder")
 espFolder.Name = "OULESP"
@@ -573,7 +737,7 @@ circle.Size = UDim2.fromOffset(Settings.FOV * 2, Settings.FOV * 2)
 circle.Parent = gui
 Instance.new("UICorner", circle).CornerRadius = UDim.new(1, 0)
 local circleStroke = Instance.new("UIStroke", circle)
-circleStroke.Color = Color3.fromRGB(255, 255, 255)
+circleStroke.Color = FOVColor
 circleStroke.Thickness = 1.5
 circleStroke.Transparency = 0.3
 
@@ -1768,9 +1932,10 @@ do
 
 	local v = newGroup(aimPage, 2, "FOV Circle")
 	addCheckbox(v, "Show FOV", "ShowFOV")
-	addColor(v, "FOV Color", paletteWith(WHITE), function(color)
+	addColor(v, "FOV Color", paletteWith(FOVColor), function(color)
 		circleStroke.Color = color
-	end, WHITE)
+		FOVColor = color
+	end, FOVColor)
 
 	local info = newGroup(aimPage, 2, "Info")
 	addHint(addNote(info, ""), function()
@@ -1846,16 +2011,16 @@ end
 local colPage = newPage("visuals_colours", true)
 do
 	local c1 = newGroup(colPage, 1, "Chams")
-	addColor(c1, "Cham Fill", paletteWith(RED), setChamColor, RED)
-	addColor(c1, "Cham Outline", paletteWith(WHITE), setChamOutlineColor, WHITE)
+	addColor(c1, "Cham Fill", paletteWith(ESPColors.Fill), setChamColor, ESPColors.Fill)
+	addColor(c1, "Cham Outline", paletteWith(ESPColors.Outline), setChamOutlineColor, ESPColors.Outline)
 
 	local cb = newGroup(colPage, 1, "Boxes")
-	addColor(cb, "Box", paletteWith(WHITE), setBoxColor, WHITE)
-	addColor(cb, "Box Fill", paletteWith(RED), setBoxFillColor, RED)
+	addColor(cb, "Box", paletteWith(ESPColors.Box), setBoxColor, ESPColors.Box)
+	addColor(cb, "Box Fill", paletteWith(ESPColors.BoxFill), setBoxFillColor, ESPColors.BoxFill)
 
 	local c2 = newGroup(colPage, 2, "Text & Lines")
-	addColor(c2, "Tracers", paletteWith(RED), setTracerColor, RED)
-	addColor(c2, "Usernames", paletteWith(WHITE), setNameColor, WHITE)
+	addColor(c2, "Tracers", paletteWith(ESPColors.Tracer), setTracerColor, ESPColors.Tracer)
+	addColor(c2, "Usernames", paletteWith(ESPColors.Name), setNameColor, ESPColors.Name)
 end
 
 -- movement > fly
@@ -1988,6 +2153,8 @@ do
 		if fn then fn() end
 	end)
 
+	addNote(u, persistOK and "settings save automatically" or "saving off: no server script")
+
 	local switchDefault = Theme.Switch
 	local accentDefault = Theme.Accent
 	local textDefault = Theme.Text
@@ -2009,7 +2176,7 @@ do
 	addColor(c, "Background", BACKGROUNDS, function(color)
 		Theme.Background = color
 		applyTheme()
-	end, BACKGROUNDS[1], 0.55, 0.28)
+	end, Theme.Background, 0.55, 0.28)
 	addColor(c, "Outline", paletteWith(outlineDefault), function(color)
 		Theme.Outline = color
 		applyTheme()
