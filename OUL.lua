@@ -7,9 +7,6 @@ local Lighting = game:GetService("Lighting")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
--- Single instance guard ------------------------------------------------
--- Closes any previous copy of this script (and anything it left behind)
--- before this one starts, so old copies can never affect the new one.
 if shared.OULCleanup then
 	pcall(shared.OULCleanup)
 	shared.OULCleanup = nil
@@ -20,7 +17,6 @@ do
 	pcall(function() RunService:UnbindFromRenderStep("AimAssist") end)
 	pcall(function() RunService:UnbindFromRenderStep("OULMenuMouse") end)
 
-	-- old menus can live in PlayerGui, CoreGui or the executor's hidden gui folder
 	local containers = { LocalPlayer:WaitForChild("PlayerGui") }
 	pcall(function() table.insert(containers, game:GetService("CoreGui")) end)
 	pcall(function()
@@ -70,20 +66,18 @@ local function track(conn)
 	return conn
 end
 
--- Animation helpers ---------------------------------------------------------
 local EASE = TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local FADE_IN = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local FADE_OUT = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 local THEME_TWEEN = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local SLIDE = TweenInfo.new(0.24, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 
-local FONT = Enum.Font.RobotoMono -- flat monospace look
+local FONT = Enum.Font.RobotoMono
 
 local function tween(obj, props, info)
 	TweenService:Create(obj, info or EASE, props):Play()
 end
 
--- sets the properties straight away, or tweens them
 local function apply(obj, props, animate)
 	if animate then
 		tween(obj, props)
@@ -94,21 +88,19 @@ local function apply(obj, props, animate)
 	end
 end
 
--- Theme (changeable from the settings tab) -----------------------------
 local Theme = {
-	Text = Color3.fromRGB(150, 210, 255),       -- main text
-	Switch = Color3.fromRGB(70, 160, 100),      -- checkbox "on" colour
-	Accent = Color3.fromRGB(95, 140, 255),      -- sliders, selected tab, selector highlight
-	Background = Color3.fromRGB(18, 18, 23),    -- menu background
-	Outline = Color3.fromRGB(52, 52, 66),       -- menu / box outlines
-	Dim = Color3.fromRGB(110, 165, 210),        -- derived: footer / inactive text
-	Field = Color3.fromRGB(34, 34, 42),         -- derived: slider bars, buttons, unchecked boxes
-	Group = Color3.fromRGB(22, 22, 28),         -- derived: section boxes
+	Text = Color3.fromRGB(150, 210, 255),
+	Switch = Color3.fromRGB(70, 160, 100),
+	Accent = Color3.fromRGB(95, 140, 255),
+	Background = Color3.fromRGB(18, 18, 23),
+	Outline = Color3.fromRGB(52, 52, 66),
+	Dim = Color3.fromRGB(110, 165, 210),
+	Field = Color3.fromRGB(34, 34, 42),
+	Group = Color3.fromRGB(22, 22, 28),
 }
-local bound = {}          -- every themed property: { obj, prop, fn }
-local themeListeners = {} -- extra callbacks (checkbox / selector state etc.)
+local bound = {}
+local themeListeners = {}
 
--- derived colours follow the text / background so every combination stays readable
 local function deriveTheme()
 	Theme.Dim = Theme.Text:Lerp(Theme.Background, 0.4)
 	Theme.Field = Theme.Background:Lerp(Theme.Text, 0.1)
@@ -116,7 +108,6 @@ local function deriveTheme()
 end
 deriveTheme()
 
--- sets obj[prop] = fn() now and again (animated) whenever the theme changes
 local function bind(obj, prop, fn)
 	obj[prop] = fn()
 	bound[#bound + 1] = { obj = obj, prop = prop, fn = fn }
@@ -144,48 +135,44 @@ local function applyTheme()
 	end
 end
 
--- Settings -------------------------------------------------------------
 local Settings = {
-	Enabled = true,       -- master switch (menu toggle), starts on
-	Holding = false,      -- true while right click is held
-	FOV = 150,            -- pixels
-	Smoothness = 1,       -- 1-100 (1 = fastest / snaps on, 100 = slowest)
-	Triggerbot = false,   -- auto-shoot when a player is under the crosshair
-	TriggerDelay = 50,    -- milliseconds to wait before shooting
-	ESP = false,          -- master ESP switch
-	Chams = false,        -- chams (highlight fill/outline), needs ESP on
-	BlurEnabled = true,   -- background blur while the menu is open
-	BlurAmount = 18,      -- 1-56
-	ShowNames = false,    -- usernames above players (needs ESP on)
-	Tracers = false,      -- lines from the centre of the screen to players (needs ESP on)
-	Boxes = false,        -- 2D box around each player (needs ESP on)
-	BoxFill = false,      -- see-through fill inside the boxes
+	Enabled = true,
+	Holding = false,
+	FOV = 150,
+	Smoothness = 1,
+	Triggerbot = false,
+	TriggerDelay = 50,
+	ESP = false,
+	Chams = false,
+	BlurEnabled = true,
+	BlurAmount = 18,
+	ShowNames = false,
+	Tracers = false,
+	Boxes = false,
+	BoxFill = false,
 	WallCheck = true,
-	Watermark = true,     -- OUL / FPS label
-	ShowFOV = false,      -- FOV circle visibility
-	AimPart = "Head",     -- "Head" or "Body"
-	UITransparency = 0,   -- 0-70 (%), how see-through the menu is
-	Fly = false,          -- fly on/off
-	FlySpeed = 60,        -- studs per second
-	FlyVortex = false,    -- body parts swirl around you while flying
-	VortexSpeed = 6,      -- 1-20, how fast the parts spin around you
-	VortexRadius = 5,     -- 2-14 studs, how wide the vortex is
-	VortexCollide = false, -- the swirling parts are solid (can push / block things)
-	Noclip = false,       -- walk through walls and other solid things
-	Speed = false,        -- change your walk speed
-	SpeedValue = 40,      -- 16-250, the walk speed used while Speed is on
-	InfiniteJump = false, -- jump again in mid-air
-	Notifications = true, -- little pop-ups when a setting is switched on / off
+	Watermark = true,
+	ShowFOV = false,
+	AimPart = "Head",
+	UITransparency = 0,
+	Fly = false,
+	FlySpeed = 60,
+	FlyVortex = false,
+	VortexSpeed = 6,
+	VortexRadius = 5,
+	VortexCollide = false,
+	Noclip = false,
+	Speed = false,
+	SpeedValue = 40,
+	InfiniteJump = false,
+	Notifications = true,
 }
 
 local setESPEnabled
 
--- Vortex is switched off for now: it can't be turned on, and its page is shaded.
--- To bring it back later, set this to false and remove the shade in the vortex page.
 local VORTEX_DISABLED = true
-local LockedSettings = { FlyVortex = true } -- checkboxes that ignore clicks
+local LockedSettings = { FlyVortex = true }
 
--- Names shown in notifications and in the keybind list
 local DisplayNames = {
 	Enabled = "Aimbot", ShowFOV = "FOV Circle", Triggerbot = "Triggerbot",
 	ESP = "ESP", Chams = "Chams", ShowNames = "Usernames", Tracers = "Tracers",
@@ -194,10 +181,6 @@ local DisplayNames = {
 	Watermark = "Watermark", BlurEnabled = "Background Blur", Notifications = "Notifications",
 }
 
--- Keybinds ---------------------------------------------------------------------
--- Every switch in the menu can have a key. "toggle" binds flip a setting, "hold" is
--- the aim button (active while held) and "menu" shows / hides the menu.
--- A bind's input is a KeyCode, a mouse button (MouseButton2 / 3) or nil (no key).
 local Binds = {}
 local function defBind(id, label, kind, key, input)
 	Binds[#Binds + 1] = { id = id, label = label, kind = kind, key = key, input = input, default = input }
@@ -248,7 +231,6 @@ local function inputMatches(input, bindInput)
 	return input.UserInputType == bindInput
 end
 
--- labels that show a key (footer, info notes) and rewrite themselves when a key changes
 local hintFns = {}
 local function addHint(label, fn)
 	label.Text = fn()
@@ -262,8 +244,8 @@ local function updateKeyHints()
 	end
 end
 
-local rebinding = nil   -- the bind that is waiting for a key press
-local bindButtons = {}  -- [bind id] = the button that shows its key
+local rebinding = nil
+local bindButtons = {}
 local function refreshBindUI()
 	for id, btn in pairs(bindButtons) do
 		local b = getBind(id)
@@ -275,38 +257,27 @@ local function refreshBindUI()
 	end
 end
 
-local toggles = {} -- [Settings key] = { toggle = function } for every checkbox (used by keybinds)
-local notify -- notify(name, on) pop-up; set once the menu exists
-local toast  -- toast(text) general pop-up; set once the menu exists
-local vortexStatus, vortexServerLabel -- little status lines in the Fly tab
+local toggles = {}
+local notify
+local toast
+local vortexStatus, vortexServerLabel
 
--- ESP / Chams -----------------------------------------------------------
--- Uses Highlight instances (visible through walls). Roblox only draws about
--- 31 highlights at once and picks which ones arbitrarily, which is why some
--- players used to be missed in busy servers. To fix that, only the closest
--- players (up to MAX_HIGHLIGHTS) are enabled, so nearby players always show.
 local MAX_HIGHLIGHTS = 30
 local ESPColors = {
-	Fill = Color3.fromRGB(255, 70, 70),      -- cham fill
-	Outline = Color3.fromRGB(255, 255, 255), -- cham outline
-	Tracer = Color3.fromRGB(255, 70, 70),    -- tracer lines
-	Name = Color3.fromRGB(255, 255, 255),    -- username text
-	Box = Color3.fromRGB(255, 255, 255),     -- box outline
-	BoxFill = Color3.fromRGB(255, 70, 70),   -- box fill
+	Fill = Color3.fromRGB(255, 70, 70),
+	Outline = Color3.fromRGB(255, 255, 255),
+	Tracer = Color3.fromRGB(255, 70, 70),
+	Name = Color3.fromRGB(255, 255, 255),
+	Box = Color3.fromRGB(255, 255, 255),
+	BoxFill = Color3.fromRGB(255, 70, 70),
 }
 
--- Saving ---------------------------------------------------------------------------
--- Your choices (switches, sliders, colours and keybinds) are loaded here once at start-up,
--- before the menu is built, and saved again about a second after anything changes.
--- With an executor they go in a local file; in a normal game they go through the
--- OULSaveServer script into a DataStore (without that script nothing is saved).
-local FOVColor = Color3.fromRGB(255, 255, 255) -- colour of the FOV circle
-local persistOK = false -- true once the server has loaded this player's data
-local saveStatusText = "saving: connecting..." -- shown in Settings > General
-local saveStatusLabel -- that label (set when the settings page is built)
-local saveNowFn = function() end -- the "Save now" button; replaced once saving works
+local FOVColor = Color3.fromRGB(255, 255, 255)
+local persistOK = false
+local saveStatusText = "saving: connecting..."
+local saveStatusLabel
+local saveNowFn = function() end
 
--- (everything else lives in a do-block to keep the script under Luau's 200-locals limit)
 do
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -334,7 +305,6 @@ local function arrToColor(a)
 	end
 end
 
--- "" = no key, "K:<KeyCode name>", "M:MouseButton2" / "M:MouseButton3"
 local function inputToString(i)
 	if not i then return "" end
 	if i.EnumType == Enum.KeyCode then return "K:" .. i.Name end
@@ -405,7 +375,7 @@ local function applySaved(d)
 	for _, bind in ipairs(Binds) do
 		local v = b[bind.id]
 		if v == "" then
-			if bind.kind ~= "menu" then bind.input = nil end -- the menu key can't be cleared
+			if bind.kind ~= "menu" then bind.input = nil end
 		elseif v ~= nil then
 			local inp = stringToInput(v)
 			if inp then bind.input = inp end
@@ -418,17 +388,13 @@ local function setStatus(text)
 	if saveStatusLabel then saveStatusLabel.Text = text end
 end
 
--- Two ways to save, picked automatically:
---   1. Executor file functions (readfile / writefile), if they exist: your settings go
---      in a local file named after your user id, so no server script is needed.
---   2. Otherwise the OULSaveServer script and a DataStore (needs the game to have it).
 local hasFiles = type(readfile) == "function" and type(writefile) == "function"
 local FILE_NAME = "OULMenu_" .. tostring(LocalPlayer.UserId) .. ".json"
 
-local manualPending = false -- a "Save now" press is waiting for the server's answer
+local manualPending = false
 
 if hasFiles then
-	-- load
+
 	local okRead, content = pcall(readfile, FILE_NAME)
 	if okRead and type(content) == "string" and content ~= "" then
 		local okDecode, data = pcall(function()
@@ -514,7 +480,7 @@ else
 	end
 
 	if persistOK then
-		-- the server tells us whether each write worked
+
 		if statusRemote then
 			track(statusRemote.OnClientEvent:Connect(function(ok, msg)
 				if ok then
@@ -561,14 +527,13 @@ else
 		end
 	end
 end
-end -- saving
+end
 
--- holds the username tags (local only, outside the characters)
 local espFolder = Instance.new("Folder")
 espFolder.Name = "OULESP"
 espFolder.Parent = workspace
-local highlights = {} -- [Player] = Highlight
-local nameTags = {}   -- [Player] = BillboardGui
+local highlights = {}
+local nameTags = {}
 
 local function removeTag(plr)
 	local t = nameTags[plr]
@@ -665,11 +630,10 @@ local function applyESP(plr, char)
 	h.FillTransparency = 0.5
 	h.OutlineTransparency = 0
 	h.Enabled = Settings.ESP and Settings.Chams
-	h.Parent = char -- must live in the character: highlights parented elsewhere did not draw
+	h.Parent = char
 	highlights[plr] = h
 end
 
--- Re-creates missing highlights and enables only the closest players
 local function refreshESP()
 	local cam = workspace.CurrentCamera
 	local camPos = cam and cam.CFrame.Position or Vector3.zero
@@ -684,7 +648,7 @@ local function refreshESP()
 					applyESP(plr, char)
 					h = highlights[plr]
 				end
-				-- username tag
+
 				local head = char:FindFirstChild("Head")
 				local tag = nameTags[plr]
 				if head and (not tag or not tag.Parent or tag.Adornee ~= head) then
@@ -701,7 +665,7 @@ local function refreshESP()
 					table.insert(list, { h = h, dist = dist })
 				end
 			else
-				removeESP(plr) -- no character right now (respawning); it is re-added when one exists
+				removeESP(plr)
 			end
 		end
 	end
@@ -717,7 +681,7 @@ end
 local function trackPlayer(plr)
 	if plr == LocalPlayer then return end
 	track(plr.CharacterAdded:Connect(function(char)
-		-- apply straight away, then again once the body has loaded
+
 		pcall(function()
 			applyESP(plr, char)
 			refreshESP()
@@ -750,7 +714,6 @@ end
 track(Players.PlayerAdded:Connect(trackPlayer))
 track(Players.PlayerRemoving:Connect(removeESP))
 
--- Keeps chams up to date (new joins, respawns, streaming, distance changes)
 task.spawn(function()
 	while alive do
 		task.wait(0.25)
@@ -761,18 +724,14 @@ task.spawn(function()
 	end
 end)
 
--- UI -------------------------------------------------------------------
 local gui = Instance.new("ScreenGui")
 gui.Name = "AimbotUI"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-gui.DisplayOrder = 999999        -- drawn above every other ScreenGui
-pcall(function() gui.OnTopOfCoreBlur = true end) -- also drawn above the Roblox menu blur
+gui.DisplayOrder = 999999
+pcall(function() gui.OnTopOfCoreBlur = true end)
 
--- Parent to CoreGui / the executor's hidden gui folder so the menu stays on top of the
--- Roblox escape menu and other core UI. A normal LocalScript is not allowed to do that,
--- so it falls back to PlayerGui (which the Roblox menu always draws over).
 do
 	local preferred
 	pcall(function()
@@ -794,7 +753,6 @@ do
 	end
 end
 
--- FOV circle
 local circle = Instance.new("Frame")
 circle.AnchorPoint = Vector2.new(0.5, 0.5)
 circle.BackgroundTransparency = 1
@@ -806,7 +764,6 @@ circleStroke.Color = FOVColor
 circleStroke.Thickness = 1.5
 circleStroke.Transparency = 0.3
 
--- small helpers -------------------------------------------------------------
 local function corner(obj, r)
 	local c = Instance.new("UICorner")
 	c.CornerRadius = UDim.new(0, r)
@@ -814,7 +771,6 @@ local function corner(obj, r)
 	return c
 end
 
--- a 1px outline whose colour follows the theme
 local function outline(obj, transparency)
 	local s = Instance.new("UIStroke")
 	s.Thickness = 1
@@ -839,26 +795,24 @@ local function newLabel(parent, text, size, dim)
 	return l
 end
 
--- layout numbers
-local SIDE_W = 96                  -- width of the tab sidebar on the left
+local SIDE_W = 96
 local PANEL_W = SIDE_W + 440
 local TITLE_H = 28
-local TAB_ROW = 30                 -- height of one tab in the sidebar
+local TAB_ROW = 30
 local PAGE_X = SIDE_W + 8
 local PAGE_Y = TITLE_H + 8
 local FOOTER_H = 18
 
--- Main panel (a CanvasGroup, so the whole menu can fade as one piece) -------
 local panel = Instance.new("CanvasGroup")
 panel.Size = UDim2.fromOffset(PANEL_W, 300)
--- starts in the middle of the screen (refined below once the real height is known)
+
 do
 	local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
 	panel.Position = UDim2.fromOffset(math.floor((vp.X - PANEL_W) / 2), math.floor((vp.Y - 300) / 2))
 end
 panel.BorderSizePixel = 0
 panel.Active = true
-panel.ZIndex = 100 -- above tracers and boxes, which are drawn at the default level
+panel.ZIndex = 100
 panel.GroupTransparency = 1
 panel.Visible = false
 panel.Parent = gui
@@ -868,7 +822,6 @@ end)
 corner(panel, 5)
 outline(panel)
 
--- thin accent line across the top
 local topLine = Instance.new("Frame")
 topLine.Size = UDim2.new(1, 0, 0, 2)
 topLine.BorderSizePixel = 0
@@ -878,7 +831,6 @@ bind(topLine, "BackgroundColor3", function()
 	return Theme.Accent
 end)
 
--- title bar (drag the menu by it)
 local titleBar = Instance.new("Frame")
 titleBar.Size = UDim2.new(1, 0, 0, TITLE_H)
 titleBar.BackgroundTransparency = 1
@@ -892,10 +844,9 @@ pcall(function()
 	title.FontFace = Font.new("rbxasset://fonts/families/RobotoMono.json", Enum.FontWeight.Bold)
 end)
 
--- tab bar ---------------------------------------------------------------------
 local TAB_NAMES = { "combat", "visuals", "movement", "settings" }
-local TAB_LABELS = { combat = "Combat", visuals = "Visuals", movement = "Movement", settings = "Settings" } -- what the tabs show
--- tabs that have sub-sections (a row of small tabs at the top of the page)
+local TAB_LABELS = { combat = "Combat", visuals = "Visuals", movement = "Movement", settings = "Settings" }
+
 local SUBTABS = {
 	combat = {
 		{ id = "aimbot", label = "Aimbot" },
@@ -908,16 +859,15 @@ local SUBTABS = {
 	settings = { { id = "general", label = "General" }, { id = "keybinds", label = "Keybinds" } },
 	movement = { { id = "fly", label = "Fly" }, { id = "vortex", label = "Vortex", disabled = true }, { id = "noclip", label = "Noclip" }, { id = "speed", label = "Speed" }, { id = "jump", label = "Jump" } },
 }
-local SUB_H = 26 -- height of the sub-tab row
-local SUB_W = 80 -- width of one sub-tab
--- the tabs sit in a sidebar down the left side
+local SUB_H = 26
+local SUB_W = 80
+
 local tabBar = Instance.new("Frame")
 tabBar.Size = UDim2.new(0, SIDE_W, 1, -(TITLE_H + FOOTER_H))
 tabBar.Position = UDim2.fromOffset(0, TITLE_H)
 tabBar.BackgroundTransparency = 1
 tabBar.Parent = panel
 
--- line under the title bar
 local titleLine = Instance.new("Frame")
 titleLine.Size = UDim2.new(1, 0, 0, 1)
 titleLine.Position = UDim2.fromOffset(0, TITLE_H)
@@ -927,7 +877,6 @@ bind(titleLine, "BackgroundColor3", function()
 	return Theme.Outline
 end)
 
--- line between the sidebar and the pages
 local tabLine = Instance.new("Frame")
 tabLine.Size = UDim2.new(0, 1, 1, -(TITLE_H + FOOTER_H))
 tabLine.Position = UDim2.fromOffset(SIDE_W, TITLE_H)
@@ -937,7 +886,6 @@ bind(tabLine, "BackgroundColor3", function()
 	return Theme.Outline
 end)
 
--- accent bar that slides up / down beside the selected tab
 local underline = Instance.new("Frame")
 underline.Size = UDim2.fromOffset(2, TAB_ROW - 8)
 underline.Position = UDim2.fromOffset(0, 11)
@@ -948,7 +896,6 @@ bind(underline, "BackgroundColor3", function()
 	return Theme.Accent
 end)
 
--- footer hint
 local footer = newLabel(panel, "", 11, true)
 footer.AnchorPoint = Vector2.new(0, 1)
 footer.Position = UDim2.new(0, PAGE_X, 1, -5)
@@ -957,7 +904,6 @@ addHint(footer, function()
 	return keyName(getBind("menu").input) .. "  -  hide / show menu"
 end)
 
--- OUL + FPS counter (always visible, draggable) -------------------------------
 local hud = Instance.new("TextLabel")
 hud.Size = UDim2.fromOffset(132, 22)
 hud.AnchorPoint = Vector2.new(1, 0)
@@ -986,7 +932,6 @@ do
 	end)
 end
 
--- Make the OUL / FPS label draggable
 do
 	hud.Active = true
 	local dragging, dragStart, startPos
@@ -1008,7 +953,6 @@ do
 	end))
 end
 
--- FPS counter
 do
 	local frames, elapsed = 0, 0
 	track(RunService.RenderStepped:Connect(function(dt)
@@ -1021,7 +965,6 @@ do
 	end))
 end
 
--- Dragging the panel by its title bar
 do
 	local dragging, dragStart, startPos
 	titleBar.InputBegan:Connect(function(input)
@@ -1042,9 +985,6 @@ do
 	end))
 end
 
--- Notifications --------------------------------------------------------------------
--- Small pop-ups in the bottom right: "Triggerbot  ON" / "OFF". They slide in, wait a
--- moment and fade out. Turn them off with Settings > General > Notifications.
 local toastHolder = Instance.new("Frame")
 toastHolder.Name = "Toasts"
 toastHolder.BackgroundTransparency = 1
@@ -1117,22 +1057,16 @@ notify = function(name, on)
 	toast(name .. "  <font color=\"" .. color .. "\">" .. (on and "ON" or "OFF") .. "</font>")
 end
 
--- Background blur (only while the menu is open) ---------------------------
 local blur = Lighting:FindFirstChild("OULMenuBlur") or Instance.new("BlurEffect")
 blur.Name = "OULMenuBlur"
 blur.Size = 0
 blur.Parent = Lighting
 local blurInfo = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
--- While the menu is open the mouse is freed, even in shift lock / first person.
--- The game's camera script locks the mouse every frame, so this runs after it
--- (last in the frame) and sets the mouse free again. The invisible Modal button is
--- the standard Roblox way to unlock the mouse and is kept as a second method.
 local menuOpen = false
 local menuToken = 0
 local prevMouseBehavior, prevMouseIcon
 
--- Blur is only applied while the menu is open (and the blur switch is on)
 local function updateBlur()
 	local target = (menuOpen and Settings.BlurEnabled) and Settings.BlurAmount or 0
 	TweenService:Create(blur, blurInfo, { Size = target }):Play()
@@ -1150,7 +1084,7 @@ local function setMenuVisible(visible)
 		prevMouseBehavior = UserInputService.MouseBehavior
 		prevMouseIcon = UserInputService.MouseIconEnabled
 	elseif not visible and menuOpen and prevMouseBehavior then
-		-- hand the mouse back to the game
+
 		UserInputService.MouseBehavior = prevMouseBehavior
 		UserInputService.MouseIconEnabled = prevMouseIcon
 		prevMouseBehavior = nil
@@ -1180,10 +1114,7 @@ RunService:BindToRenderStep("OULMenuMouse", Enum.RenderPriority.Last.Value, func
 	end
 end)
 
--- Pages and boxes -----------------------------------------------------------
--- Each tab is a page with two columns. A column stacks "group boxes" (a title and
--- a list of controls). Everything sizes itself, so adding a control just works.
-local refreshers = {} -- [Settings key] = function that redraws that checkbox (used by hotkeys)
+local refreshers = {}
 local orders = setmetatable({}, { __mode = "k" })
 local function nextOrder(parent)
 	local n = (orders[parent] or 0) + 1
@@ -1231,7 +1162,6 @@ local function newPage(name, hasSubs)
 	return page
 end
 
--- a titled box inside a column; returns the frame that controls are added to
 local function newGroup(page, colIndex, titleText)
 	local col = page.cols[colIndex].frame
 
@@ -1284,9 +1214,6 @@ local function newGroup(page, colIndex, titleText)
 	return content
 end
 
--- Controls ---------------------------------------------------------------------
-
--- small dim text line
 local function addNote(parent, text)
 	local l = newLabel(parent, text, 11, true)
 	l.Size = UDim2.new(1, 0, 0, 14)
@@ -1294,7 +1221,6 @@ local function addNote(parent, text)
 	return l
 end
 
--- checkbox
 local function addCheckbox(parent, text, key, onChanged)
 	local row = Instance.new("TextButton")
 	row.Size = UDim2.new(1, 0, 0, 20)
@@ -1342,9 +1268,8 @@ local function addCheckbox(parent, text, key, onChanged)
 	end)
 	refreshers[key] = refresh
 
-	-- one place that flips the setting, used by clicks and by keybinds
 	local function toggleSetting()
-		if LockedSettings[key] then return end -- locked (disabled feature)
+		if LockedSettings[key] then return end
 		Settings[key] = not Settings[key]
 		refresh(true)
 		if onChanged then onChanged(Settings[key]) end
@@ -1359,7 +1284,6 @@ local function addCheckbox(parent, text, key, onChanged)
 	return row
 end
 
--- slider: the bar itself carries the text, like "FOV: 150"
 local function addSlider(parent, text, min, max, key, onChanged)
 	local bar = Instance.new("Frame")
 	bar.Size = UDim2.new(1, 0, 0, 20)
@@ -1432,7 +1356,6 @@ local function addSlider(parent, text, min, max, key, onChanged)
 	return bar
 end
 
--- two-option selector (the highlight slides between the options)
 local function addSegment(parent, text, key, optA, optB)
 	local row = Instance.new("Frame")
 	row.Size = UDim2.new(1, 0, 0, 22)
@@ -1504,7 +1427,6 @@ local function addSegment(parent, text, key, optA, optB)
 	return row
 end
 
--- flat button
 local function addButton(parent, text, color, hoverColor, onClick)
 	local btn = Instance.new("TextButton")
 	btn.Size = UDim2.new(1, 0, 0, 22)
@@ -1529,49 +1451,44 @@ local function addButton(parent, text, color, hoverColor, onClick)
 	return btn
 end
 
--- Colour rows -------------------------------------------------------------------
--- A label with a colour box on the right. Click it and a palette (16 swatches +
--- a rainbow bar for any colour) slides open underneath.
 local PALETTE = {
-	Color3.fromRGB(255, 255, 255), -- white
-	Color3.fromRGB(255, 70, 70),   -- red
-	Color3.fromRGB(255, 160, 60),  -- orange
-	Color3.fromRGB(255, 205, 60),  -- gold
-	Color3.fromRGB(255, 230, 80),  -- yellow
-	Color3.fromRGB(170, 230, 70),  -- lime
-	Color3.fromRGB(90, 220, 120),  -- green
-	Color3.fromRGB(150, 240, 170), -- mint
-	Color3.fromRGB(60, 200, 200),  -- teal
-	Color3.fromRGB(80, 220, 255),  -- cyan
-	Color3.fromRGB(120, 180, 255), -- sky
-	Color3.fromRGB(95, 140, 255),  -- blue
-	Color3.fromRGB(160, 100, 255), -- purple
-	Color3.fromRGB(230, 90, 230),  -- magenta
-	Color3.fromRGB(255, 120, 200), -- pink
-	Color3.fromRGB(170, 170, 185), -- grey
+	Color3.fromRGB(255, 255, 255),
+	Color3.fromRGB(255, 70, 70),
+	Color3.fromRGB(255, 160, 60),
+	Color3.fromRGB(255, 205, 60),
+	Color3.fromRGB(255, 230, 80),
+	Color3.fromRGB(170, 230, 70),
+	Color3.fromRGB(90, 220, 120),
+	Color3.fromRGB(150, 240, 170),
+	Color3.fromRGB(60, 200, 200),
+	Color3.fromRGB(80, 220, 255),
+	Color3.fromRGB(120, 180, 255),
+	Color3.fromRGB(95, 140, 255),
+	Color3.fromRGB(160, 100, 255),
+	Color3.fromRGB(230, 90, 230),
+	Color3.fromRGB(255, 120, 200),
+	Color3.fromRGB(170, 170, 185),
 }
 
--- dark and light backgrounds for the menu
 local BACKGROUNDS = {
-	Color3.fromRGB(18, 18, 23),    -- charcoal (default)
-	Color3.fromRGB(8, 8, 10),      -- black
-	Color3.fromRGB(30, 30, 30),    -- graphite
-	Color3.fromRGB(48, 48, 56),    -- slate
-	Color3.fromRGB(16, 24, 44),    -- navy
-	Color3.fromRGB(14, 30, 48),    -- ocean
-	Color3.fromRGB(26, 32, 52),    -- night
-	Color3.fromRGB(20, 40, 44),    -- deep teal
-	Color3.fromRGB(16, 36, 30),    -- forest
-	Color3.fromRGB(40, 26, 16),    -- brown
-	Color3.fromRGB(44, 20, 24),    -- maroon
-	Color3.fromRGB(44, 16, 40),    -- plum
-	Color3.fromRGB(32, 20, 48),    -- purple
-	Color3.fromRGB(60, 36, 60),    -- mauve
-	Color3.fromRGB(210, 216, 230), -- silver
-	Color3.fromRGB(235, 238, 245), -- light
+	Color3.fromRGB(18, 18, 23),
+	Color3.fromRGB(8, 8, 10),
+	Color3.fromRGB(30, 30, 30),
+	Color3.fromRGB(48, 48, 56),
+	Color3.fromRGB(16, 24, 44),
+	Color3.fromRGB(14, 30, 48),
+	Color3.fromRGB(26, 32, 52),
+	Color3.fromRGB(20, 40, 44),
+	Color3.fromRGB(16, 36, 30),
+	Color3.fromRGB(40, 26, 16),
+	Color3.fromRGB(44, 20, 24),
+	Color3.fromRGB(44, 16, 40),
+	Color3.fromRGB(32, 20, 48),
+	Color3.fromRGB(60, 36, 60),
+	Color3.fromRGB(210, 216, 230),
+	Color3.fromRGB(235, 238, 245),
 }
 
--- the palette with `default` as the first swatch (so the default shows as selected)
 local function paletteWith(default)
 	for _, c in ipairs(PALETTE) do
 		if c == default then
@@ -1585,7 +1502,7 @@ local function paletteWith(default)
 	return list
 end
 
-local GRID_W = 8 * 18 + 7 * 5 -- eight swatches per line
+local GRID_W = 8 * 18 + 7 * 5
 local PAL_H = 60
 
 local function addColor(parent, text, colors, onPick, default, hueS, hueV)
@@ -1631,7 +1548,6 @@ local function addColor(parent, text, colors, onPick, default, hueS, hueV)
 		tween(previewStroke, { Transparency = 0.2 })
 	end)
 
-	-- palette (slides open / closed)
 	local pal = Instance.new("Frame")
 	pal.Size = UDim2.new(1, 0, 0, 0)
 	pal.BackgroundTransparency = 1
@@ -1651,7 +1567,7 @@ local function addColor(parent, text, colors, onPick, default, hueS, hueV)
 	gl.SortOrder = Enum.SortOrder.LayoutOrder
 	gl.Parent = grid
 
-	local marker -- rainbow bar marker, hidden when a swatch is picked
+	local marker
 	local marks = {}
 	local function selectSwatch(index, animate)
 		for j, st in ipairs(marks) do
@@ -1692,7 +1608,6 @@ local function addColor(parent, text, colors, onPick, default, hueS, hueV)
 		end)
 	end
 
-	-- rainbow bar: click or drag to pick any colour
 	local bar = Instance.new("Frame")
 	bar.Size = UDim2.fromOffset(GRID_W, 8)
 	bar.Position = UDim2.fromOffset(0, 50)
@@ -1752,14 +1667,12 @@ local function addColor(parent, text, colors, onPick, default, hueS, hueV)
 		end
 	end))
 
-	-- open / close
 	local open = false
 	head.MouseButton1Click:Connect(function()
 		open = not open
 		tween(pal, { Size = UDim2.new(1, 0, 0, open and PAL_H or 0) }, SLIDE)
 	end)
 
-	-- mark the default colour as selected
 	for i, color in ipairs(colors) do
 		if color == default then
 			selectSwatch(i, false)
@@ -1768,13 +1681,12 @@ local function addColor(parent, text, colors, onPick, default, hueS, hueV)
 	return holder
 end
 
--- Tabs ------------------------------------------------------------------------------
 local tabButtons = {}
 local tabIndex = {}
-local subButtons = {} -- [tab id][sub id] = button
-local subIndex = {}   -- [tab id][sub id] = position in the row
-local subPos = {}     -- [tab id][sub id] = { x, w } of its button in the row
-local subBars = {}    -- [tab id] = { frame, line }
+local subButtons = {}
+local subIndex = {}
+local subPos = {}
+local subBars = {}
 
 local function pageKey(tab, sub)
 	return sub and (tab .. "_" .. sub) or tab
@@ -1806,7 +1718,7 @@ updateSize = function(animate)
 	end
 	if not currentPage or not pages[currentPage] then return end
 	local cur = pages[currentPage]
-	-- never shorter than the sidebar needs
+
 	local pageH = math.max(pageHeight(cur) + cur.subOffset, #TAB_NAMES * TAB_ROW + 8)
 	local target = UDim2.fromOffset(PANEL_W, PAGE_Y + pageH + FOOTER_H + 8)
 	if animate then
@@ -1816,7 +1728,6 @@ updateSize = function(animate)
 	end
 end
 
--- opens a tab (and one of its sub-sections, if it has any)
 local function selectPage(tabId, subId, instant)
 	currentTab = tabId
 	if subId then
@@ -1850,7 +1761,6 @@ local function selectPage(tabId, subId, instant)
 		end
 	end
 
-	-- the sidebar bar
 	local idx = tabIndex[tabId]
 	local pos = UDim2.fromOffset(0, 8 + (idx - 1) * TAB_ROW + 3)
 	if instant then
@@ -1859,7 +1769,6 @@ local function selectPage(tabId, subId, instant)
 		tween(underline, { Position = pos }, SLIDE)
 	end
 
-	-- the sub-tab row (only shown for tabs that have one)
 	for id, bar in pairs(subBars) do
 		bar.frame.Visible = (id == tabId)
 	end
@@ -1913,7 +1822,6 @@ for i, name in ipairs(TAB_NAMES) do
 	end)
 end
 
--- sub-tab rows (Combat: Aimbot / Triggerbot, Visuals: ESP / Colours)
 for tabId, subs in pairs(SUBTABS) do
 	local bar = Instance.new("Frame")
 	bar.BackgroundTransparency = 1
@@ -1984,11 +1892,9 @@ onTheme(function()
 	refreshTabs(true)
 end)
 
--- Build the pages ---------------------------------------------------------------------
 local WHITE = Color3.fromRGB(255, 255, 255)
 local RED = Color3.fromRGB(255, 70, 70)
 
--- combat > aimbot
 local aimPage = newPage("combat_aimbot", true)
 do
 	local g = newGroup(aimPage, 1, "Aimbot")
@@ -2014,7 +1920,6 @@ do
 	addNote(info, "needs mouse lock")
 end
 
--- combat > triggerbot
 local trigPage = newPage("combat_trigger", true)
 do
 	local t = newGroup(trigPage, 1, "Triggerbot")
@@ -2029,7 +1934,6 @@ do
 	addNote(info, "needs mouse lock")
 end
 
--- placeholder pages for features that are still being built
 local function addPlaceholderPage(pageName, boxTitle)
 	local page = newPage(pageName, true)
 	local g = newGroup(page, 1, boxTitle)
@@ -2042,16 +1946,12 @@ local function addPlaceholderPage(pageName, boxTitle)
 	return page
 end
 
--- combat > silent aim (in development)
 addPlaceholderPage("combat_silent", "Silent Aim")
 
--- combat > antikatana (in development)
 addPlaceholderPage("combat_antikatana", "Antikatana")
 
--- combat > ragebot (in development)
 addPlaceholderPage("combat_ragebot", "Ragebot")
 
--- visuals > esp
 local espPage = newPage("visuals_esp", true)
 do
 	local g = newGroup(espPage, 1, "ESP")
@@ -2076,7 +1976,6 @@ do
 	addNote(info, "colours are in Colours")
 end
 
--- visuals > colours
 local colPage = newPage("visuals_colours", true)
 do
 	local c1 = newGroup(colPage, 1, "Chams")
@@ -2092,7 +1991,6 @@ do
 	addColor(c2, "Usernames", paletteWith(ESPColors.Name), setNameColor, ESPColors.Name)
 end
 
--- movement > fly
 local flyPage = newPage("movement_fly", true)
 do
 	local g = newGroup(flyPage, 1, "Fly")
@@ -2108,7 +2006,6 @@ do
 	end)
 end
 
--- movement > vortex
 local vortexPage = newPage("movement_vortex", true)
 do
 	local g = newGroup(vortexPage, 1, "Vortex")
@@ -2123,7 +2020,7 @@ do
 	addNote(st, "works with or without fly")
 
 	if VORTEX_DISABLED then
-		-- dark shade over the whole section; being a button, it also blocks clicks
+
 		local shade = Instance.new("TextButton")
 		shade.Name = "DisabledShade"
 		shade.Size = UDim2.new(1, 0, 1, 0)
@@ -2137,7 +2034,6 @@ do
 		shade.Parent = vortexPage.frame
 		corner(shade, 4)
 
-		-- red "Disabled" label, centered on the page
 		local tag = Instance.new("TextLabel")
 		tag.Name = "DisabledLabel"
 		tag.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -2156,7 +2052,6 @@ do
 	end
 end
 
--- movement > speed
 local speedPage = newPage("movement_speed", true)
 do
 	local g = newGroup(speedPage, 1, "Speed")
@@ -2169,7 +2064,6 @@ do
 	addNote(info, "when you switch it off")
 end
 
--- movement > jump
 local jumpPage = newPage("movement_jump", true)
 do
 	local g = newGroup(jumpPage, 1, "Infinite Jump")
@@ -2180,7 +2074,6 @@ do
 	addNote(info, "just press jump")
 end
 
--- movement > noclip
 local noclipPage = newPage("movement_noclip", true)
 do
 	local g = newGroup(noclipPage, 1, "Noclip")
@@ -2195,7 +2088,6 @@ do
 	addNote(info, "move through anything")
 end
 
--- settings tab
 local settingsPage = newPage("settings_general", true)
 do
 	local m = newGroup(settingsPage, 1, "Menu")
@@ -2255,7 +2147,6 @@ do
 	end, outlineDefault, 0.45, 0.6)
 end
 
--- settings > keybinds
 local keyPage = newPage("settings_keybinds", true)
 do
 	local function addKeybindRow(parent, id)
@@ -2327,8 +2218,6 @@ do
 	end)
 end
 
--- Every page is shown (but see-through) for one frame so the layouts can measure
--- themselves, then the other pages are hidden and the panel is sized to the first tab.
 currentTab = "combat"
 currentPage = pageKey("combat", currentSub.combat)
 for name, p in pairs(pages) do
@@ -2344,7 +2233,6 @@ task.spawn(function()
 		updateSize(false)
 		selectPage("combat", nil, true)
 
-		-- centre the menu now that its real height is known
 		local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
 		if vp then
 			panel.Position = UDim2.fromOffset(
@@ -2357,7 +2245,6 @@ end)
 
 setMenuVisible(true)
 
--- Core logic -------------------------------------------------------------
 local function isVisible(part, character)
 	if not Settings.WallCheck then return true end
 	local params = RaycastParams.new()
@@ -2377,14 +2264,12 @@ local function getAimPart(char)
 		or char:FindFirstChild("HumanoidRootPart")
 end
 
--- Players further away than this are ignored by the aimbot (keeps it off the lobby)
-local MAX_AIM_DISTANCE = 1000 -- studs
+local MAX_AIM_DISTANCE = 1000
 
 local function getTarget()
 	local mousePos = UserInputService:GetMouseLocation()
 	local best, bestDist = nil, Settings.FOV
 
-	-- distance is measured from your character (or the camera if you have none)
 	local myChar = LocalPlayer.Character
 	local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
 	local origin = myRoot and myRoot.Position or Camera.CFrame.Position
@@ -2409,11 +2294,6 @@ local function getTarget()
 	return best
 end
 
--- Triggerbot ---------------------------------------------------------------
--- Casts a ray through the cursor. If a living player is the first thing hit, it
--- waits TriggerDelay ms, then activates the tool you are holding.
--- Like the aimbot, it only works while the mouse is locked, so with a free cursor
--- (the lobby, menus) it never fires.
 local triggerSeenAt = nil
 local lastShot = 0
 
@@ -2429,7 +2309,6 @@ local function playerUnderCrosshair()
 	local result = workspace:Raycast(ray.Origin, ray.Direction * MAX_AIM_DISTANCE, params)
 	if not result then return nil end
 
-	-- walks up from the part hit (works for accessories too)
 	local model = result.Instance:FindFirstAncestorOfClass("Model")
 	local plr = model and Players:GetPlayerFromCharacter(model)
 	local hum = model and model:FindFirstChildOfClass("Humanoid")
@@ -2439,8 +2318,6 @@ local function playerUnderCrosshair()
 	return nil
 end
 
--- Fires a left click. No tool is needed: it tries an executor click first, then
--- VirtualInputManager, and only uses tool:Activate() if neither is available.
 local function fireClick()
 	if mouse1click then
 		if pcall(mouse1click) then return end
@@ -2482,12 +2359,8 @@ track(RunService.Heartbeat:Connect(function()
 	end
 end))
 
--- Tracers ----------------------------------------------------------------
--- A line from the centre of the screen to every other player within 1000 studs, including players behind you. Built from
--- thin rotated Frames, so it works without the Drawing library. The colour comes
--- from the Tracer Color row in ESP Colours. Needs ESP and Tracers both switched on.
-local tracerLines = {} -- [Player] = Frame
-local TRACER_MAX_DISTANCE = 1000 -- studs: players further away get no tracer
+local tracerLines = {}
+local TRACER_MAX_DISTANCE = 1000
 
 local function removeTracer(plr)
 	local line = tracerLines[plr]
@@ -2511,7 +2384,6 @@ track(RunService.RenderStepped:Connect(function()
 	local size = cam.ViewportSize
 	local from = Vector2.new(size.X / 2, size.Y / 2)
 
-	-- distance is measured from your character (or the camera if you have none)
 	local myChar = LocalPlayer.Character
 	local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
 	local origin = myRoot and myRoot.Position or cam.CFrame.Position
@@ -2528,13 +2400,11 @@ track(RunService.RenderStepped:Connect(function()
 				and (root.Position - origin).Magnitude <= TRACER_MAX_DISTANCE then
 				local p = cam:WorldToViewportPoint(root.Position)
 
-				-- direction of the line on screen
 				local delta
 				if p.Z > 0 then
-					delta = Vector2.new(p.X, p.Y) - from -- in front: straight to the player
+					delta = Vector2.new(p.X, p.Y) - from
 				else
-					-- behind you the screen position is mirrored, so work it out from the
-					-- camera instead: the line points the way the player is and runs off the edge
+
 					local lp = cam.CFrame:PointToObjectSpace(root.Position)
 					local dir = Vector2.new(lp.X, -lp.Y)
 					dir = dir.Magnitude > 0.001 and dir.Unit or Vector2.new(0, 1)
@@ -2568,11 +2438,7 @@ track(RunService.RenderStepped:Connect(function()
 	end
 end))
 
--- Boxes --------------------------------------------------------------------
--- A 2D box around every other player, sized from their position on screen. Made from
--- a Frame with an outline, so it needs no Drawing library. The fill is a see-through
--- version of the same Frame. Needs ESP and Boxes both switched on.
-local boxFrames = {} -- [Player] = Frame
+local boxFrames = {}
 
 local function removeBox(plr)
 	local f = boxFrames[plr]
@@ -2605,7 +2471,7 @@ track(RunService.RenderStepped:Connect(function()
 			if hum and root and hum.Health > 0 then
 				local top = cam:WorldToViewportPoint(root.Position + Vector3.new(0, 2.8, 0))
 				local bottom = cam:WorldToViewportPoint(root.Position - Vector3.new(0, 3.2, 0))
-				if top.Z > 0 and bottom.Z > 0 then -- only players in front of the camera
+				if top.Z > 0 and bottom.Z > 0 then
 					local h = math.abs(bottom.Y - top.Y)
 					local w = h * 0.55
 					if h > 2 then
@@ -2638,11 +2504,6 @@ track(RunService.RenderStepped:Connect(function()
 	end
 end))
 
--- Fly ----------------------------------------------------------------------
--- While Fly is on you move through the air with W A S D (relative to where the
--- camera looks), Space goes up and Left Control goes down. Speed comes from the
--- Fly tab. The character is set to PlatformStand so its animations don't fight the
--- movement, and everything goes back to normal when Fly is switched off.
 local flyActive = false
 
 local function flyDirection()
@@ -2673,12 +2534,10 @@ track(RunService.Stepped:Connect(function()
 		flyActive = true
 		hum.PlatformStand = true
 
-		-- ignore the movement keys while typing in a text box (chat etc.)
 		local dir = UserInputService:GetFocusedTextBox() and Vector3.new(0, 0, 0) or flyDirection()
 		root.AssemblyLinearVelocity = dir * Settings.FlySpeed
 		root.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
 
-		-- stay upright and face the way the camera looks
 		local look = workspace.CurrentCamera.CFrame.LookVector
 		local flat = Vector3.new(look.X, 0, look.Z)
 		if flat.Magnitude > 0.01 then
@@ -2691,9 +2550,6 @@ track(RunService.Stepped:Connect(function()
 	end
 end))
 
--- Speed ----------------------------------------------------------------------
--- While Speed is on, your Humanoid's WalkSpeed is set every frame (games often reset
--- it). Switching it off puts back the speed you had before.
 local speedHum, speedOrig
 track(RunService.Heartbeat:Connect(function()
 	local char = LocalPlayer.Character
@@ -2711,8 +2567,6 @@ track(RunService.Heartbeat:Connect(function()
 	end
 end))
 
--- Infinite jump ---------------------------------------------------------------
--- Every time you press jump (even in mid-air) the Humanoid is told to jump again.
 track(UserInputService.JumpRequest:Connect(function()
 	if not Settings.InfiniteJump then return end
 	local char = LocalPlayer.Character
@@ -2722,13 +2576,7 @@ track(UserInputService.JumpRequest:Connect(function()
 	end
 end))
 
--- Noclip ---------------------------------------------------------------------
--- While Noclip is on, every solid part of your character is made non-solid each
--- physics step (the Humanoid keeps turning them back on, so it has to be repeated),
--- which lets you walk straight through walls. You still stand on the floor, because
--- the Humanoid holds you up with a ray rather than with your parts. Switching it off
--- puts back only the parts that were solid before.
-local noclipOrig = {} -- [BasePart] = true for every part noclip turned non-solid
+local noclipOrig = {}
 
 local function noclipRestore()
 	for part in pairs(noclipOrig) do
@@ -2753,19 +2601,8 @@ track(RunService.Stepped:Connect(function()
 	end
 end))
 
--- Vortex mode ----------------------------------------------------------------
--- While Vortex Mode is on (Fly is not needed), every body part except the head swirls
--- around you. Each joint (Motor6D) is switched off and the parts are placed
--- directly every frame, which works on R6, R15 and custom rigs. The head stays
--- at its normal position so the camera doesn't move. Everything is put back
--- when the effect ends (or on respawn).
---
--- Other players: the VortexServer script stores your on/off state as attributes on
--- your Player, and every player's menu runs this same effect for anyone who has it
--- on. Without that script you still see your own vortex, but nobody else does.
-local vortexStates = {} -- [Player] = state
+local vortexStates = {}
 
--- the swirling parts are only solid when Vortex Collision is on (the head never is)
 local function vortexCollides(j)
 	return (Settings.VortexCollide and not Settings.Noclip and not j.head) and true or false
 end
@@ -2775,7 +2612,6 @@ local function vortexEase(st)
 	return b * b * (3 - 2 * b)
 end
 
--- places every part: the normal animated pose blended with the swirl
 local function vortexPlace(st, root, ease)
 	local joints = st.joints
 	local t = os.clock()
@@ -2784,7 +2620,7 @@ local function vortexPlace(st, root, ease)
 	local center = root.Position
 	local count = math.max(st.orbitCount, 1)
 
-	local rest = { [root] = root.CFrame } -- where each part is with a normal body
+	local rest = { [root] = root.CFrame }
 
 	for _, j in ipairs(joints) do
 		local m = j.motor
@@ -2820,7 +2656,6 @@ local function vortexRestore(plr)
 	end
 	st.conns = {}
 
-	-- put every part back in its normal pose BEFORE reconnecting the joints (no snap)
 	if st.root and st.root.Parent then
 		pcall(vortexPlace, st, st.root, 0)
 	end
@@ -2863,13 +2698,13 @@ local function vortexBuild(plr, char, hum, root)
 		char = char,
 		hum = hum,
 		root = root,
-		joints = {},        -- ordered from the root outwards
-		orbitCount = 0,     -- how many parts swirl (everything except the head)
-		blend = 0,          -- 0 = normal body, 1 = full vortex
-		dirty = false,      -- a joint was added, rebuild the list
-		requiresNeck = nil, -- original Humanoid.RequiresNeck value
+		joints = {},
+		orbitCount = 0,
+		blend = 0,
+		dirty = false,
+		requiresNeck = nil,
 		conns = {},
-		ncc = {},           -- NoCollisionConstraints that stop parts shoving your own body
+		ncc = {},
 		speed = Settings.VortexSpeed,
 		radius = Settings.VortexRadius,
 	}
@@ -2882,7 +2717,6 @@ local function vortexBuild(plr, char, hum, root)
 		end
 	end
 
-	-- order the joints from the root outwards, so a part's parent is always placed first
 	local placed = { [root] = true }
 	local done = {}
 	local slot = 0
@@ -2914,19 +2748,16 @@ local function vortexBuild(plr, char, hum, root)
 	end
 	st.orbitCount = slot
 
-	-- R15 kills your character if the neck joint is broken, so turn that off while active
 	if plr == LocalPlayer then
 		st.requiresNeck = hum.RequiresNeck
 		hum.RequiresNeck = false
 	end
 
-	-- switch the joints off: from now on the parts are positioned directly
 	for _, j in ipairs(st.joints) do
 		j.motor.Enabled = false
 		j.part.CanCollide = vortexCollides(j)
 	end
 
-	-- the swirling parts never collide with your own root or head (so they can't shove you)
 	local headPart
 	for _, j in ipairs(st.joints) do
 		if j.head then headPart = j.part end
@@ -2945,7 +2776,6 @@ local function vortexBuild(plr, char, hum, root)
 		end
 	end
 
-	-- if a joint is added later (the rig finishes loading, a morph), rebuild the list
 	table.insert(st.conns, char.DescendantAdded:Connect(function(d)
 		if d:IsA("Motor6D") then
 			st.dirty = true
@@ -2955,8 +2785,6 @@ local function vortexBuild(plr, char, hum, root)
 	return st
 end
 
--- Runs before physics each step: keeps collisions off (the Humanoid turns them back
--- on) and places the parts so physics never gets a chance to drag them away.
 track(RunService.Stepped:Connect(function()
 	for _, st in pairs(vortexStates) do
 		if st.char and st.root and st.root.Parent then
@@ -2970,7 +2798,6 @@ track(RunService.Stepped:Connect(function()
 	end
 end))
 
--- tells the server about your vortex state so other players can see it
 local vortexRemote
 task.spawn(function()
 	vortexRemote = game:GetService("ReplicatedStorage"):WaitForChild("OULVortexEvent", 5)
@@ -3011,7 +2838,7 @@ local function vortexFrame(dt)
 
 		local st = vortexStates[plr]
 		if st and (st.char ~= char or not root or st.root ~= root) then
-			vortexRestore(plr) -- respawned or lost the character
+			vortexRestore(plr)
 			st = nil
 		end
 
@@ -3076,8 +2903,6 @@ end))
 
 track(Players.PlayerRemoving:Connect(vortexRestore))
 
--- Key presses: keybind capture (Settings > Keybinds), then every bound key.
--- Keys are not used while typing in chat (processed), except while capturing a new one.
 track(UserInputService.InputBegan:Connect(function(input, processed)
 	if rebinding then
 		local b = rebinding
@@ -3092,7 +2917,7 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 					toast("The menu key can't be cleared")
 					return
 				end
-				newInput = false -- clear the key
+				newInput = false
 			elseif input.KeyCode ~= Enum.KeyCode.Unknown then
 				newInput = input.KeyCode
 			else
@@ -3102,10 +2927,9 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 			or input.UserInputType == Enum.UserInputType.MouseButton3 then
 			newInput = input.UserInputType
 		else
-			return -- left click is for the menu itself, other inputs are ignored
+			return
 		end
 
-		-- a key can only belong to one switch, so take it away from any other
 		if newInput then
 			for _, o in ipairs(Binds) do
 				if o ~= b and o.input == newInput then
@@ -3122,7 +2946,7 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 		return
 	end
 
-	if processed then return end -- typing in chat, etc.
+	if processed then return end
 
 	for _, b in ipairs(Binds) do
 		if b.input and inputMatches(input, b.input) then
@@ -3138,22 +2962,18 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 	end
 end))
 
--- Camera restore: if the camera gets teleported right after aiming ends,
--- put the rotation back to where the aimbot ended.
-local RETURN_WINDOW = 1.0            -- seconds after aiming ends that snap-backs are blocked
-local JUMP_ANGLE = math.rad(25)      -- a one-frame camera change bigger than this counts as a teleport
+local RETURN_WINDOW = 1.0
+local JUMP_ANGLE = math.rad(25)
 local aimEndedAt = 0
 local savedCFrame = nil
 
--- The aimbot only works while the mouse is locked (shift lock, first person, or a game
--- that holds the cursor at the centre). With a free cursor it does nothing.
-local aiming = false -- true on frames where the aimbot is actually applied
+local aiming = false
 
 track(UserInputService.InputEnded:Connect(function(input)
 	if inputMatches(input, getBind("aim").input) then
 		if aiming then
 			aimEndedAt = os.clock()
-			savedCFrame = workspace.CurrentCamera.CFrame -- where the aimbot ended
+			savedCFrame = workspace.CurrentCamera.CFrame
 		end
 		Settings.Holding = false
 	end
@@ -3162,12 +2982,10 @@ end))
 RunService:BindToRenderStep("Aimbot", Enum.RenderPriority.Camera.Value + 1, function(dt)
 	Camera = workspace.CurrentCamera
 
-	-- keep FOV circle on the cursor
 	local m = UserInputService:GetMouseLocation()
 	circle.Position = UDim2.fromOffset(m.X, m.Y)
 	circle.Visible = Settings.Enabled and Settings.ShowFOV
 
-	-- restore the aim position if the camera gets teleported after aiming ends
 	if savedCFrame and not Settings.Holding then
 		if os.clock() - aimEndedAt > RETURN_WINDOW then
 			savedCFrame = nil
@@ -3177,15 +2995,14 @@ RunService:BindToRenderStep("Aimbot", Enum.RenderPriority.Camera.Value + 1, func
 			local mouseMoved = UserInputService:GetMouseDelta().Magnitude
 
 			if angle > JUMP_ANGLE and mouseMoved < 2 then
-				-- keep the current position, put the rotation back to where the aimbot ended
+
 				Camera.CFrame = CFrame.new(cur.Position) * (savedCFrame - savedCFrame.Position)
 			else
-				savedCFrame = cur -- normal movement, keep following it
+				savedCFrame = cur
 			end
 		end
 	end
 
-	-- only apply while the mouse is locked (not free, and not while the menu is open)
 	local mouseLocked = UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
 	aiming = Settings.Enabled and Settings.Holding and mouseLocked and not menuOpen
 	if not aiming then return end
@@ -3193,7 +3010,6 @@ RunService:BindToRenderStep("Aimbot", Enum.RenderPriority.Camera.Value + 1, func
 	local target = getTarget()
 	if not target then return end
 
-	-- frame-rate independent smoothing
 	local s = math.clamp(Settings.Smoothness / 100, 0, 0.98)
 	local alpha = 1 - s ^ (dt * 60)
 
@@ -3201,11 +3017,9 @@ RunService:BindToRenderStep("Aimbot", Enum.RenderPriority.Camera.Value + 1, func
 	Camera.CFrame = Camera.CFrame:Lerp(goal, alpha)
 end)
 
--- Cleanup (called automatically if this script is started again) ---------
 local function cleanup()
 	alive = false
 
-	-- switch every feature off
 	Settings.Enabled = false
 	Settings.Holding = false
 	Settings.Triggerbot = false
@@ -3220,15 +3034,12 @@ local function cleanup()
 	Settings.InfiniteJump = false
 	rebinding = nil
 
-	-- give back your normal walk speed
 	pcall(function()
 		if speedHum and speedHum.Parent then speedHum.WalkSpeed = speedOrig end
 	end)
 
-	-- make solid parts solid again
 	pcall(noclipRestore)
 
-	-- put the body parts back and tell the server to stop
 	pcall(vortexRestoreAll)
 	pcall(function()
 		if vortexRemote then
@@ -3236,7 +3047,6 @@ local function cleanup()
 		end
 	end)
 
-	-- stop flying: give the character back its normal physics
 	pcall(function()
 		local char = LocalPlayer.Character
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -3253,7 +3063,6 @@ local function cleanup()
 	pcall(function() RunService:UnbindFromRenderStep("Aimbot") end)
 	pcall(function() RunService:UnbindFromRenderStep("OULMenuMouse") end)
 
-	-- hand the mouse back to the game if the menu was open
 	pcall(function()
 		if menuOpen and prevMouseBehavior then
 			UserInputService.MouseBehavior = prevMouseBehavior
