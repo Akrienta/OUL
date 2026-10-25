@@ -2483,7 +2483,7 @@ track(RunService.Heartbeat:Connect(function()
 end))
 
 -- Tracers ----------------------------------------------------------------
--- A line from the centre of the screen to every other player within 1000 studs. Built from
+-- A line from the centre of the screen to every other player within 1000 studs, including players behind you. Built from
 -- thin rotated Frames, so it works without the Drawing library. The colour comes
 -- from the Tracer Color row in ESP Colours. Needs ESP and Tracers both switched on.
 local tracerLines = {} -- [Player] = Frame
@@ -2527,24 +2527,38 @@ track(RunService.RenderStepped:Connect(function()
 			if hum and root and hum.Health > 0
 				and (root.Position - origin).Magnitude <= TRACER_MAX_DISTANCE then
 				local p = cam:WorldToViewportPoint(root.Position)
-				if p.Z > 0 then -- only players in front of the camera
-					shown = true
-					if not line then
-						line = Instance.new("Frame")
-						line.Name = "OULTracer"
-						line.AnchorPoint = Vector2.new(0.5, 0.5)
-						line.BorderSizePixel = 0
-						line.Parent = gui
-						tracerLines[plr] = line
-					end
-					local to = Vector2.new(p.X, p.Y)
-					local delta = to - from
-					line.BackgroundColor3 = ESPColors.Tracer
-					line.Size = UDim2.fromOffset(delta.Magnitude, 1.5)
-					line.Position = UDim2.fromOffset((from.X + to.X) / 2, (from.Y + to.Y) / 2)
-					line.Rotation = math.deg(math.atan2(delta.Y, delta.X))
-					line.Visible = true
+
+				-- direction of the line on screen
+				local delta
+				if p.Z > 0 then
+					delta = Vector2.new(p.X, p.Y) - from -- in front: straight to the player
+				else
+					-- behind you the screen position is mirrored, so work it out from the
+					-- camera instead: the line points the way the player is and runs off the edge
+					local lp = cam.CFrame:PointToObjectSpace(root.Position)
+					local dir = Vector2.new(lp.X, -lp.Y)
+					dir = dir.Magnitude > 0.001 and dir.Unit or Vector2.new(0, 1)
+					delta = dir * math.max(size.X, size.Y)
 				end
+				if delta.Magnitude > 4000 then
+					delta = delta.Unit * 4000
+				end
+
+				shown = true
+				if not line then
+					line = Instance.new("Frame")
+					line.Name = "OULTracer"
+					line.AnchorPoint = Vector2.new(0.5, 0.5)
+					line.BorderSizePixel = 0
+					line.Parent = gui
+					tracerLines[plr] = line
+				end
+				local to = from + delta
+				line.BackgroundColor3 = ESPColors.Tracer
+				line.Size = UDim2.fromOffset(delta.Magnitude, 1.5)
+				line.Position = UDim2.fromOffset((from.X + to.X) / 2, (from.Y + to.Y) / 2)
+				line.Rotation = math.deg(math.atan2(delta.Y, delta.X))
+				line.Visible = true
 			end
 
 			if not shown and line then
