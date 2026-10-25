@@ -341,6 +341,9 @@ local ESPColors = {
 -- again about a second after anything changes. Without that script nothing is saved.
 local FOVColor = Color3.fromRGB(255, 255, 255) -- colour of the FOV circle
 local persistOK = false -- true once the server has loaded this player's data
+local saveStatusText = "saving: connecting..." -- shown in Settings > General
+local saveStatusLabel -- that label (set when the settings page is built)
+local saveNowFn = function() end -- the "Save now" button; replaced once saving works
 
 -- (everything else lives in a do-block to keep the script under Luau's 200-locals limit)
 do
@@ -452,6 +455,14 @@ end
 local saveRemote = ReplicatedStorage:FindFirstChild("OULSaveSettings")
 local loadFn = ReplicatedStorage:WaitForChild("OULLoadSettings", 3)
 saveRemote = saveRemote or ReplicatedStorage:WaitForChild("OULSaveSettings", 1)
+local statusRemote = ReplicatedStorage:FindFirstChild("OULSaveStatus") or ReplicatedStorage:WaitForChild("OULSaveStatus", 1)
+
+local function setStatus(text)
+	saveStatusText = text
+	if saveStatusLabel then saveStatusLabel.Text = text end
+end
+
+local manualPending = false -- a "Save now" press is waiting for the server's answer
 
 if loadFn and saveRemote then
 	local result, done = nil, false
@@ -469,16 +480,48 @@ if loadFn and saveRemote then
 
 	if type(result) == "table" and result.loaded then
 		persistOK = true
+		setStatus("saving: on")
 		if type(result.data) == "table" then
 			local ok, err = pcall(applySaved, result.data)
 			if not ok then warn("[OUL save] could not apply saved settings: " .. tostring(err)) end
 		end
+	elseif type(result) == "table" then
+		setStatus("saving off: load failed")
+		warn("[OUL save] the server could not load your data, so saving is off: " .. tostring(result.reason))
+	else
+		setStatus("saving off: no reply")
+		warn("[OUL save] the server did not answer in time, so saving is off")
 	end
 else
-	warn("[OUL save] OULSaveServer not found, so your settings will not be saved")
+	setStatus("saving off: no server script")
+	warn("[OUL save] OULSaveServer not found in ReplicatedStorage/ServerScriptService, so your settings will not be saved")
 end
 
 if persistOK then
+	-- the server tells us whether each write worked
+	if statusRemote then
+		track(statusRemote.OnClientEvent:Connect(function(ok, msg)
+			if ok then
+				setStatus("saved")
+			else
+				setStatus("save failed (see Output)")
+				warn("[OUL save] " .. tostring(msg))
+			end
+			if manualPending then
+				manualPending = false
+				if toast then toast(ok and "Settings saved" or "Save failed - see Output") end
+			end
+		end))
+	end
+
+	saveNowFn = function()
+		manualPending = true
+		setStatus("saving...")
+		pcall(function()
+			saveRemote:FireServer(takeSnapshot(), true)
+		end)
+	end
+
 	local lastSaved = HttpService:JSONEncode(takeSnapshot())
 	task.spawn(function()
 		while alive do
@@ -489,12 +532,17 @@ if persistOK then
 			end)
 			if ok and enc ~= lastSaved then
 				lastSaved = enc
+				setStatus("saving...")
 				pcall(function()
 					saveRemote:FireServer(takeSnapshot())
 				end)
 			end
 		end
 	end)
+else
+	saveNowFn = function()
+		if toast then toast("Saving is off - see the status line") end
+	end
 end
 end -- saving
 
@@ -2153,7 +2201,10 @@ do
 		if fn then fn() end
 	end)
 
-	addNote(u, persistOK and "settings save automatically" or "saving off: no server script")
+	addButton(u, "Save now", Color3.fromRGB(70, 90, 140), Color3.fromRGB(90, 112, 170), function()
+		saveNowFn()
+	end)
+	saveStatusLabel = addNote(u, saveStatusText)
 
 	local switchDefault = Theme.Switch
 	local accentDefault = Theme.Accent
