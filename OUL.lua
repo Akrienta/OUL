@@ -1,43 +1,3 @@
---[[
-    Aimbot LocalScript
-    Place in: StarterPlayer > StarterPlayerScripts  (as a LocalScript)
-
-    Menu: flat, compact, tabbed (Combat / Visuals / Movement / Settings). The menu key (End by default) hides/shows it
-    (it fades in and out). Drag it by the title bar. Always drawn on top of the Roblox
-    menu when CoreGui / gethui access exists, and opening it frees the mouse even in
-    shift lock / first person.
-
-    combat tab  (sub-sections: Aimbot, Triggerbot, Silent Aim, Antikatana, Ragebot - the last three are in development)
-    - Hold RIGHT CLICK to aim (only active while held; change the key in Settings > Keybinds)
-    - The aimbot only applies while the mouse is locked (shift lock, first person, or the
-      cursor stuck at the centre of the screen). With a free cursor it does nothing.
-    - Enabled, FOV, Smoothness, Target (Head / Body)
-    - Triggerbot: Enabled + Delay. Auto-fires the tool you are holding when a player is
-      under the crosshair. Like the aimbot, it only works while the mouse is locked.
-      Press P to switch it on / off (changeable in Settings > Keybinds).
-    - FOV Circle: Show FOV + FOV colour
-    - Only targets players within 1000 studs (MAX_AIM_DISTANCE) so the lobby is ignored
-    - Camera restore: if the camera is teleported right after aiming ends,
-      it is put back to where the aimbot ended
-
-    visuals tab  (sub-sections: ESP, Colours)
-    - Enabled, Chams, Show Usernames, Tracers, Boxes (+ optional Box Fill)
-    - ESP Colours: cham fill, cham outline, tracers, usernames
-
-    movement tab  (sub-sections: Fly, Vortex, Noclip, Speed, Jump)
-    - Vortex Mode: body parts swirl around you (speed + radius sliders, optional collision)
-    - Enabled (or press =), Speed slider. W A S D move relative to the camera,
-      Space goes up, Left Control goes down
-
-    settings tab  (General, Keybinds - every switch can have its own key)
-    - Notifications: small ON / OFF pop-ups when you switch something
-    - UI Transparency slider, Watermark (OUL / FPS label), Background Blur + amount
-    - Unload: turns off aimbot / ESP and removes the whole script
-    - Menu Colours: checkbox, accent, text, background, outline
-
-    Every colour row opens a palette of 16 swatches plus a rainbow bar for any colour.
-]]
-
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -891,7 +851,11 @@ local FOOTER_H = 18
 -- Main panel (a CanvasGroup, so the whole menu can fade as one piece) -------
 local panel = Instance.new("CanvasGroup")
 panel.Size = UDim2.fromOffset(PANEL_W, 300)
-panel.Position = UDim2.fromOffset(20, 80)
+-- starts in the middle of the screen (refined below once the real height is known)
+do
+	local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
+	panel.Position = UDim2.fromOffset(math.floor((vp.X - PANEL_W) / 2), math.floor((vp.Y - 300) / 2))
+end
 panel.BorderSizePixel = 0
 panel.Active = true
 panel.ZIndex = 100 -- above tracers and boxes, which are drawn at the default level
@@ -2379,6 +2343,15 @@ task.spawn(function()
 	if alive then
 		updateSize(false)
 		selectPage("combat", nil, true)
+
+		-- centre the menu now that its real height is known
+		local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
+		if vp then
+			panel.Position = UDim2.fromOffset(
+				math.floor((vp.X - PANEL_W) / 2),
+				math.floor((vp.Y - panel.Size.Y.Offset) / 2)
+			)
+		end
 	end
 end)
 
