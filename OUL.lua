@@ -986,12 +986,20 @@ do
 	end))
 end
 
+local TOAST_W = 260
+local TOAST_H = 30
+local TOAST_GAP = 6
+local TOAST_TIME = 2.6 -- how long a toast stays before fading out
+local TOAST_IN = TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+local TOAST_OUT = TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+local TOAST_COLLAPSE = TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
 local toastHolder = Instance.new("Frame")
 toastHolder.Name = "Toasts"
 toastHolder.BackgroundTransparency = 1
 toastHolder.AnchorPoint = Vector2.new(1, 1)
-toastHolder.Position = UDim2.new(1, -14, 1, -14)
-toastHolder.Size = UDim2.fromOffset(210, 260)
+toastHolder.Position = UDim2.new(1, -14, 1, -8)
+toastHolder.Size = UDim2.fromOffset(TOAST_W, 300)
 toastHolder.ZIndex = 200
 toastHolder.Parent = gui
 do
@@ -999,63 +1007,126 @@ do
 	tl.SortOrder = Enum.SortOrder.LayoutOrder
 	tl.VerticalAlignment = Enum.VerticalAlignment.Bottom
 	tl.HorizontalAlignment = Enum.HorizontalAlignment.Right
-	tl.Padding = UDim.new(0, 6)
+	tl.Padding = UDim.new(0, 0)
 	tl.Parent = toastHolder
 end
 
 local toastOrder = 0
 local toastList = {}
 
-toast = function(richText)
+-- toast(text)                       -> plain message with the menu accent colour
+-- toast(text, accentColor, "STATE") -> message with a coloured stripe and a state tag on the right
+toast = function(text, accent, state)
+	accent = accent or Theme.Accent
 	toastOrder += 1
-	local t = Instance.new("CanvasGroup")
-	t.Size = UDim2.fromOffset(200, 26)
-	t.BorderSizePixel = 0
-	t.GroupTransparency = 1
-	t.LayoutOrder = toastOrder
-	t.ZIndex = 200
-	t.Parent = toastHolder
-	bind(t, "BackgroundColor3", function()
-		return Theme.Background
-	end)
-	corner(t, 4)
-	local stroke = outline(t, 0.2)
-	bind(stroke, "Color", function()
-		return Theme.Accent
-	end)
 
-	local l = Instance.new("TextLabel")
-	l.BackgroundTransparency = 1
-	l.Size = UDim2.new(1, 0, 1, 0)
-	l.Font = FONT
-	l.TextSize = 12
-	l.RichText = true
-	l.Text = richText
-	l.ZIndex = 201
-	l.Parent = t
-	themeText(l)
+	-- the slot is what the list layout controls; the card inside it is what slides
+	local slot = Instance.new("Frame")
+	slot.Name = "ToastSlot"
+	slot.BackgroundTransparency = 1
+	slot.Size = UDim2.fromOffset(TOAST_W, TOAST_H + TOAST_GAP)
+	slot.LayoutOrder = toastOrder
+	slot.Parent = toastHolder
 
-	toastList[#toastList + 1] = t
+	local card = Instance.new("CanvasGroup")
+	card.Size = UDim2.fromOffset(TOAST_W, TOAST_H)
+	card.Position = UDim2.fromOffset(TOAST_W + 40, 0) -- starts off-screen to the right
+	card.BackgroundColor3 = Theme.Background
+	card.BorderSizePixel = 0
+	card.GroupTransparency = 1
+	card.ZIndex = 200
+	card.Parent = slot
+	corner(card, 5)
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Thickness = 1
+	stroke.Transparency = 0.2
+	stroke.Color = Theme.Outline
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Parent = card
+
+	local stripe = Instance.new("Frame")
+	stripe.Size = UDim2.new(0, 3, 1, 0)
+	stripe.BackgroundColor3 = accent
+	stripe.BorderSizePixel = 0
+	stripe.ZIndex = 201
+	stripe.Parent = card
+
+	local rightW = state and 36 or 0
+
+	local label = Instance.new("TextLabel")
+	label.BackgroundTransparency = 1
+	label.Position = UDim2.fromOffset(13, 0)
+	label.Size = UDim2.new(1, -(13 + 10 + rightW), 1, 0)
+	label.Font = FONT
+	label.TextSize = 12
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.TextTruncate = Enum.TextTruncate.AtEnd
+	label.RichText = true
+	label.Text = text
+	label.TextColor3 = Theme.Text
+	label.ZIndex = 201
+	label.Parent = card
+
+	if state then
+		local tag = Instance.new("TextLabel")
+		tag.BackgroundTransparency = 1
+		tag.AnchorPoint = Vector2.new(1, 0)
+		tag.Position = UDim2.new(1, -10, 0, 0)
+		tag.Size = UDim2.new(0, rightW, 1, 0)
+		tag.Font = FONT
+		tag.TextSize = 12
+		tag.TextXAlignment = Enum.TextXAlignment.Right
+		tag.Text = state
+		tag.TextColor3 = accent
+		tag.ZIndex = 201
+		tag.Parent = card
+		pcall(function()
+			tag.FontFace = Font.new("rbxasset://fonts/families/RobotoMono.json", Enum.FontWeight.Bold)
+		end)
+	end
+
+	-- thin timer line along the bottom that drains while the toast is visible
+	local timer = Instance.new("Frame")
+	timer.AnchorPoint = Vector2.new(0, 1)
+	timer.Position = UDim2.new(0, 3, 1, 0)
+	timer.Size = UDim2.new(1, -3, 0, 2)
+	timer.BackgroundColor3 = accent
+	timer.BackgroundTransparency = 0.45
+	timer.BorderSizePixel = 0
+	timer.ZIndex = 201
+	timer.Parent = card
+
+	toastList[#toastList + 1] = slot
 	while #toastList > 5 do
 		local old = table.remove(toastList, 1)
 		pcall(function() old:Destroy() end)
 	end
 
-	tween(t, { GroupTransparency = 0 }, FADE_IN)
-	task.delay(2.2, function()
-		if t.Parent then
-			tween(t, { GroupTransparency = 1 }, TweenInfo.new(0.3))
-			task.delay(0.35, function()
-				pcall(function() t:Destroy() end)
+	-- slide in from the right while fading in
+	tween(card, { Position = UDim2.fromOffset(0, 0), GroupTransparency = 0 }, TOAST_IN)
+	tween(timer, { Size = UDim2.new(0, 0, 0, 2) }, TweenInfo.new(TOAST_TIME, Enum.EasingStyle.Linear))
+
+	-- fade out, then collapse the gap and clean up
+	task.delay(TOAST_TIME, function()
+		if not card.Parent then return end
+		tween(card, { GroupTransparency = 1 }, TOAST_OUT)
+		task.delay(TOAST_OUT.Time, function()
+			if not slot.Parent then return end
+			tween(slot, { Size = UDim2.fromOffset(TOAST_W, 0) }, TOAST_COLLAPSE)
+			task.delay(TOAST_COLLAPSE.Time + 0.02, function()
+				local idx = table.find(toastList, slot)
+				if idx then table.remove(toastList, idx) end
+				pcall(function() slot:Destroy() end)
 			end)
-		end
+		end)
 	end)
 end
 
 notify = function(name, on)
 	if not Settings.Notifications then return end
-	local color = on and "rgb(90,200,120)" or "rgb(235,90,90)"
-	toast(name .. "  <font color=\"" .. color .. "\">" .. (on and "ON" or "OFF") .. "</font>")
+	local color = on and Color3.fromRGB(90, 200, 120) or Color3.fromRGB(235, 90, 90)
+	toast(name, color, on and "ON" or "OFF")
 end
 
 local blur = Lighting:FindFirstChild("OULMenuBlur") or Instance.new("BlurEffect")
