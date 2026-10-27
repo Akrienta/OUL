@@ -139,6 +139,8 @@ local Settings = {
 	Enabled = true,
 	Holding = false,
 	FOV = 150,
+	IgnoreFOV = false,
+	TeamCheck = true,
 	Smoothness = 1,
 	Triggerbot = false,
 	TriggerDelay = 50,
@@ -175,7 +177,7 @@ local VORTEX_DISABLED = true
 local LockedSettings = { FlyVortex = true }
 
 local DisplayNames = {
-	Enabled = "Aimbot", ShowFOV = "FOV Circle", Triggerbot = "Triggerbot",
+	Enabled = "Aimbot", ShowFOV = "FOV Circle", IgnoreFOV = "Ignore FOV", TeamCheck = "Team Check", Triggerbot = "Triggerbot",
 	ESP = "ESP", Chams = "Chams", ShowNames = "Usernames", Tracers = "Tracers",
 	Boxes = "Boxes", BoxFill = "Box Fill", Fly = "Fly", FlyVortex = "Vortex",
 	Noclip = "Noclip", Speed = "Speed", InfiniteJump = "Infinite Jump",
@@ -189,7 +191,7 @@ end
 defBind("menu", "Menu", "menu", nil, Enum.KeyCode.End)
 defBind("aim", "Aim (hold)", "hold", nil, Enum.UserInputType.MouseButton2)
 for _, k in ipairs({
-	"Enabled", "ShowFOV", "Triggerbot", "ESP", "Chams", "ShowNames", "Tracers", "Boxes",
+	"Enabled", "ShowFOV", "IgnoreFOV", "TeamCheck", "Triggerbot", "ESP", "Chams", "ShowNames", "Tracers", "Boxes",
 	"BoxFill", "Fly", "Noclip", "Speed", "InfiniteJump", "Watermark", "BlurEnabled", "Notifications",
 }) do
 	local default
@@ -284,7 +286,7 @@ local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local SAVE_BOOLS = {
-	"Enabled", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
+	"Enabled", "IgnoreFOV", "TeamCheck", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
 	"Boxes", "BoxFill", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed",
 	"InfiniteJump", "Notifications",
 }
@@ -1900,6 +1902,8 @@ local aimPage = newPage("combat_aimbot", true)
 do
 	local g = newGroup(aimPage, 1, "Aimbot")
 	addCheckbox(g, "Enabled", "Enabled")
+	addCheckbox(g, "Ignore FOV", "IgnoreFOV")
+	addCheckbox(g, "Team Check", "TeamCheck")
 	addSlider(g, "FOV", 20, 500, "FOV", function(v)
 		circle.Size = UDim2.fromOffset(v * 2, v * 2)
 	end)
@@ -1932,6 +1936,8 @@ do
 	addHint(addNote(info, ""), function()
 		return keyName(getBind("Triggerbot").input) .. "  -  triggerbot on / off"
 	end)
+	addNote(info, "uses Team Check")
+	addNote(info, "(set in the Aimbot tab)")
 	addNote(info, "range: 1000 studs")
 	addNote(info, "needs mouse lock")
 end
@@ -2189,7 +2195,7 @@ do
 	end
 
 	local c = newGroup(keyPage, 1, "Combat")
-	for _, id in ipairs({ "aim", "Enabled", "ShowFOV", "Triggerbot" }) do
+	for _, id in ipairs({ "aim", "Enabled", "ShowFOV", "IgnoreFOV", "TeamCheck", "Triggerbot" }) do
 		addKeybindRow(c, id)
 	end
 
@@ -2247,6 +2253,17 @@ end)
 
 setMenuVisible(true)
 
+-- returns false for players you cannot damage (teammates, spawn-protected).
+-- every combat feature should call this before picking a target.
+local function canDamage(plr)
+	if not Settings.TeamCheck then return true end
+	local char = plr.Character
+	if char and char:FindFirstChildOfClass("ForceField") then return false end
+	local myTeam, theirTeam = LocalPlayer.Team, plr.Team
+	if LocalPlayer.Neutral or plr.Neutral or not myTeam or not theirTeam then return true end
+	return myTeam ~= theirTeam
+end
+
 local function isVisible(part, character)
 	if not Settings.WallCheck then return true end
 	local params = RaycastParams.new()
@@ -2270,7 +2287,7 @@ local MAX_AIM_DISTANCE = 1000
 
 local function getTarget()
 	local mousePos = UserInputService:GetMouseLocation()
-	local best, bestDist = nil, Settings.FOV
+	local best, bestDist = nil, Settings.IgnoreFOV and math.huge or Settings.FOV
 
 	local myChar = LocalPlayer.Character
 	local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
@@ -2281,7 +2298,7 @@ local function getTarget()
 			local char = plr.Character
 			local hum = char and char:FindFirstChildOfClass("Humanoid")
 			local part = char and getAimPart(char)
-			if hum and hum.Health > 0 and part
+			if hum and hum.Health > 0 and part and canDamage(plr)
 				and (part.Position - origin).Magnitude <= MAX_AIM_DISTANCE then
 				local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
 				if onScreen then
@@ -2339,7 +2356,7 @@ local function playerUnderCrosshair()
 	local model = result.Instance:FindFirstAncestorOfClass("Model")
 	local plr = model and Players:GetPlayerFromCharacter(model)
 	local hum = model and model:FindFirstChildOfClass("Humanoid")
-	if plr and plr ~= LocalPlayer and hum and hum.Health > 0 then
+	if plr and plr ~= LocalPlayer and hum and hum.Health > 0 and canDamage(plr) then
 		return plr
 	end
 	return nil
@@ -3017,7 +3034,7 @@ RunService:BindToRenderStep("Aimbot", Enum.RenderPriority.Camera.Value + 1, func
 
 	local m = UserInputService:GetMouseLocation()
 	circle.Position = UDim2.fromOffset(m.X, m.Y)
-	circle.Visible = Settings.Enabled and Settings.ShowFOV
+	circle.Visible = Settings.Enabled and Settings.ShowFOV and not Settings.IgnoreFOV
 
 	if savedCFrame and not Settings.Holding then
 		if os.clock() - aimEndedAt > RETURN_WINDOW then
