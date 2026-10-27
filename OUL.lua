@@ -139,10 +139,16 @@ local Settings = {
 	Enabled = true,
 	Holding = false,
 	FOV = 150,
+	IgnoreFOV = false,
 	Smoothness = 1,
 	Triggerbot = false,
 	TriggerDelay = 50,
 	TriggerOnClick = false, -- only auto-shoot while left click is held
+	SilentAim = false,
+	SilentPart = "Head",
+	SilentFOV = 150,
+	SilentShowFOV = true,
+	SilentIgnoreFOV = false,
 	ESP = true,
 	Chams = true,
 	BlurEnabled = true,
@@ -176,6 +182,7 @@ local LockedSettings = { FlyVortex = true }
 
 local DisplayNames = {
 	Enabled = "Aimbot", ShowFOV = "FOV Circle", Triggerbot = "Triggerbot",
+	SilentAim = "Silent Aim",
 	ESP = "ESP", Chams = "Chams", ShowNames = "Usernames", Tracers = "Tracers",
 	Boxes = "Boxes", BoxFill = "Box Fill", Fly = "Fly", FlyVortex = "Vortex",
 	Noclip = "Noclip", Speed = "Speed", InfiniteJump = "Infinite Jump",
@@ -189,7 +196,7 @@ end
 defBind("menu", "Menu", "menu", nil, Enum.KeyCode.End)
 defBind("aim", "Aim (hold)", "hold", nil, Enum.UserInputType.MouseButton2)
 for _, k in ipairs({
-	"Enabled", "ShowFOV", "Triggerbot", "ESP", "Chams", "ShowNames", "Tracers", "Boxes",
+	"Enabled", "ShowFOV", "Triggerbot", "SilentAim", "ESP", "Chams", "ShowNames", "Tracers", "Boxes",
 	"BoxFill", "Fly", "Noclip", "Speed", "InfiniteJump", "Watermark", "BlurEnabled", "Notifications",
 }) do
 	local default
@@ -262,6 +269,7 @@ local toggles = {}
 local notify
 local toast
 local vortexStatus, vortexServerLabel
+local silentStatus
 
 local MAX_HIGHLIGHTS = 30
 local ESPColors = {
@@ -274,6 +282,7 @@ local ESPColors = {
 }
 
 local FOVColor = Color3.fromRGB(255, 255, 255)
+local SilentFOVColor = Color3.fromRGB(255, 255, 255)
 local persistOK = false
 local saveStatusText = "saving: connecting..."
 local saveStatusLabel
@@ -284,12 +293,13 @@ local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local SAVE_BOOLS = {
-	"Enabled", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
+	"Enabled", "IgnoreFOV", "Triggerbot", "TriggerOnClick", "SilentAim", "SilentShowFOV", "SilentIgnoreFOV",
+	"ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
 	"Boxes", "BoxFill", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed",
 	"InfiniteJump", "Notifications",
 }
 local SAVE_NUMBERS = {
-	FOV = { 20, 500 }, Smoothness = { 1, 100 }, TriggerDelay = { 0, 300 },
+	FOV = { 20, 500 }, SilentFOV = { 20, 500 }, Smoothness = { 1, 100 }, TriggerDelay = { 0, 300 },
 	BlurAmount = { 1, 56 }, UITransparency = { 0, 70 }, FlySpeed = { 5, 1000 },
 	VortexSpeed = { 1, 20 }, VortexRadius = { 2, 14 }, SpeedValue = { 16, 250 },
 }
@@ -333,6 +343,7 @@ local function takeSnapshot()
 		snap.settings[k] = Settings[k]
 	end
 	snap.settings.AimPart = Settings.AimPart
+	snap.settings.SilentPart = Settings.SilentPart
 	for _, k in ipairs(SAVE_THEME) do
 		snap.theme[k] = colorToArr(Theme[k])
 	end
@@ -340,6 +351,7 @@ local function takeSnapshot()
 		snap.esp[k] = colorToArr(ESPColors[k])
 	end
 	snap.fov = colorToArr(FOVColor)
+	snap.silentFov = colorToArr(SilentFOVColor)
 	for _, b in ipairs(Binds) do
 		snap.binds[b.id] = inputToString(b.input)
 	end
@@ -357,6 +369,7 @@ local function applySaved(d)
 		end
 	end
 	if s.AimPart == "Head" or s.AimPart == "Body" then Settings.AimPart = s.AimPart end
+	if s.SilentPart == "Head" or s.SilentPart == "Body" then Settings.SilentPart = s.SilentPart end
 
 	local t = type(d.theme) == "table" and d.theme or {}
 	for _, k in ipairs(SAVE_THEME) do
@@ -371,6 +384,7 @@ local function applySaved(d)
 		if c then ESPColors[k] = c end
 	end
 	FOVColor = arrToColor(d.fov) or FOVColor
+	SilentFOVColor = arrToColor(d.silentFov) or SilentFOVColor
 
 	local b = type(d.binds) == "table" and d.binds or {}
 	for _, bind in ipairs(Binds) do
@@ -764,6 +778,19 @@ local circleStroke = Instance.new("UIStroke", circle)
 circleStroke.Color = FOVColor
 circleStroke.Thickness = 1.5
 circleStroke.Transparency = 0.3
+
+local silentCircle = Instance.new("Frame")
+silentCircle.Name = "SilentFOV"
+silentCircle.AnchorPoint = Vector2.new(0.5, 0.5)
+silentCircle.BackgroundTransparency = 1
+silentCircle.Size = UDim2.fromOffset(Settings.SilentFOV * 2, Settings.SilentFOV * 2)
+silentCircle.Visible = false
+silentCircle.Parent = gui
+Instance.new("UICorner", silentCircle).CornerRadius = UDim.new(1, 0)
+local silentCircleStroke = Instance.new("UIStroke", silentCircle)
+silentCircleStroke.Color = SilentFOVColor
+silentCircleStroke.Thickness = 1.5
+silentCircleStroke.Transparency = 0.3
 
 local function corner(obj, r)
 	local c = Instance.new("UICorner")
@@ -1903,6 +1930,7 @@ do
 	addSlider(g, "FOV", 20, 500, "FOV", function(v)
 		circle.Size = UDim2.fromOffset(v * 2, v * 2)
 	end)
+	addCheckbox(g, "Ignore FOV", "IgnoreFOV")
 	addSlider(g, "Smoothness", 1, 100, "Smoothness")
 	addSegment(g, "Target", "AimPart", "Head", "Body")
 
@@ -1917,8 +1945,12 @@ do
 	addHint(addNote(info, ""), function()
 		return "hold " .. string.lower(keyName(getBind("aim").input)) .. " to aim"
 	end)
+	addNote(info, "moves your mouse onto")
+	addNote(info, "the target (head / body)")
 	addNote(info, "range: 1000 studs")
 	addNote(info, "needs mouse lock")
+	addNote(info, "ignore fov: any player")
+	addNote(info, "on screen, closest first")
 end
 
 local trigPage = newPage("combat_trigger", true)
@@ -1936,6 +1968,34 @@ do
 	addNote(info, "needs mouse lock")
 end
 
+local silentPage = newPage("combat_silent", true)
+do
+	local g = newGroup(silentPage, 1, "Silent Aim")
+	addCheckbox(g, "Enabled", "SilentAim")
+	addSegment(g, "Target", "SilentPart", "Head", "Body")
+	addCheckbox(g, "Ignore FOV", "SilentIgnoreFOV")
+
+	local v = newGroup(silentPage, 2, "FOV Circle")
+	addCheckbox(v, "Show FOV", "SilentShowFOV")
+	addSlider(v, "FOV", 20, 500, "SilentFOV", function(val)
+		silentCircle.Size = UDim2.fromOffset(val * 2, val * 2)
+	end)
+	addColor(v, "FOV Color", paletteWith(SilentFOVColor), function(color)
+		silentCircleStroke.Color = color
+		SilentFOVColor = color
+	end, SilentFOVColor)
+
+	local info = newGroup(silentPage, 1, "Info")
+	addHint(addNote(info, ""), function()
+		return keyName(getBind("SilentAim").input) .. "  -  silent aim on / off"
+	end)
+	silentStatus = addNote(info, "Hook: starting")
+	addNote(info, "mouse + camera rays are")
+	addNote(info, "spoofed onto the target")
+	addNote(info, "look anywhere you like")
+	addNote(info, "range: 1000 studs")
+end
+
 local function addPlaceholderPage(pageName, boxTitle)
 	local page = newPage(pageName, true)
 	local g = newGroup(page, 1, boxTitle)
@@ -1947,8 +2007,6 @@ local function addPlaceholderPage(pageName, boxTitle)
 	end)
 	return page
 end
-
-addPlaceholderPage("combat_silent", "Silent Aim")
 
 addPlaceholderPage("combat_antikatana", "Antikatana")
 
@@ -2189,7 +2247,7 @@ do
 	end
 
 	local c = newGroup(keyPage, 1, "Combat")
-	for _, id in ipairs({ "aim", "Enabled", "ShowFOV", "Triggerbot" }) do
+	for _, id in ipairs({ "aim", "Enabled", "ShowFOV", "Triggerbot", "SilentAim" }) do
 		addKeybindRow(c, id)
 	end
 
@@ -2257,8 +2315,8 @@ local function isVisible(part, character)
 	return result == nil
 end
 
-local function getAimPart(char)
-	if Settings.AimPart == "Head" then
+local function getAimPart(char, which)
+	if which == "Head" then
 		return char:FindFirstChild("Head")
 	end
 	return char:FindFirstChild("UpperTorso")
@@ -2268,9 +2326,12 @@ end
 
 local MAX_AIM_DISTANCE = 1000
 
-local function getTarget()
+-- which: "Head" / "Body", fov: pixel radius, ignoreFOV: pick the closest player
+-- regardless of the circle, allowOffscreen: (only with ignoreFOV) also allow
+-- players that are behind / outside the camera view (used by silent aim)
+local function getTarget(which, fov, ignoreFOV, allowOffscreen)
 	local mousePos = UserInputService:GetMouseLocation()
-	local best, bestDist = nil, Settings.FOV
+	local best, bestDist = nil, ignoreFOV and math.huge or fov
 
 	local myChar = LocalPlayer.Character
 	local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
@@ -2280,20 +2341,83 @@ local function getTarget()
 		if plr ~= LocalPlayer then
 			local char = plr.Character
 			local hum = char and char:FindFirstChildOfClass("Humanoid")
-			local part = char and getAimPart(char)
+			local part = char and getAimPart(char, which)
 			if hum and hum.Health > 0 and part
 				and (part.Position - origin).Magnitude <= MAX_AIM_DISTANCE then
 				local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+				local dist
 				if onScreen then
-					local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-					if dist < bestDist and isVisible(part, char) then
-						best, bestDist = part, dist
-					end
+					dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+				elseif ignoreFOV and allowOffscreen then
+					-- off screen players rank behind every on screen player
+					dist = 100000 + (part.Position - origin).Magnitude
+				end
+				if dist and dist < bestDist and isVisible(part, char) then
+					best, bestDist = part, dist
 				end
 			end
 		end
 	end
 	return best
+end
+
+---------------------------------------------------------------------
+-- Silent aim: spoofs what the game reads from the mouse / camera
+---------------------------------------------------------------------
+local silentTarget = nil
+local silentPos = Vector3.zero
+local silentCamPos = Vector3.zero
+local silentScreen = Vector2.new(0, 0)
+
+local mouseObj = LocalPlayer:GetMouse()
+
+local function silentActive()
+	return alive and Settings.SilentAim and silentTarget ~= nil and not menuOpen
+end
+
+do
+	local ok, err = pcall(function()
+		assert(hookmetamethod and newcclosure and checkcaller and getnamecallmethod,
+			"executor is missing hookmetamethod / newcclosure / checkcaller / getnamecallmethod")
+
+		local oldIndex, oldNamecall
+
+		oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
+			if self == mouseObj and type(key) == "string" and silentActive() and not checkcaller() then
+				if key == "Hit" then
+					return CFrame.new(silentPos)
+				elseif key == "Target" then
+					return silentTarget
+				elseif key == "X" then
+					return silentScreen.X
+				elseif key == "Y" then
+					return silentScreen.Y
+				elseif key == "UnitRay" then
+					return Ray.new(silentCamPos, (silentPos - silentCamPos).Unit)
+				end
+			end
+			return oldIndex(self, key)
+		end))
+
+		oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+			local method = getnamecallmethod()
+			if silentActive() and not checkcaller() then
+				if method == "GetMouseLocation" and self == UserInputService then
+					return silentScreen
+				elseif (method == "ViewportPointToRay" or method == "ScreenPointToRay") and self == Camera then
+					return Ray.new(silentCamPos, (silentPos - silentCamPos).Unit)
+				end
+			end
+			return oldNamecall(self, ...)
+		end))
+	end)
+
+	if silentStatus then
+		silentStatus.Text = ok and "Hook: active" or "Hook: unsupported"
+	end
+	if not ok then
+		warn("[OUL silent] could not install the spoof hooks: " .. tostring(err))
+	end
 end
 
 local triggerSeenAt = nil
@@ -2995,19 +3119,8 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 	end
 end))
 
-local RETURN_WINDOW = 1.0
-local JUMP_ANGLE = math.rad(25)
-local aimEndedAt = 0
-local savedCFrame = nil
-
-local aiming = false
-
 track(UserInputService.InputEnded:Connect(function(input)
 	if inputMatches(input, getBind("aim").input) then
-		if aiming then
-			aimEndedAt = os.clock()
-			savedCFrame = workspace.CurrentCamera.CFrame
-		end
 		Settings.Holding = false
 	end
 end))
@@ -3017,37 +3130,54 @@ RunService:BindToRenderStep("Aimbot", Enum.RenderPriority.Camera.Value + 1, func
 
 	local m = UserInputService:GetMouseLocation()
 	circle.Position = UDim2.fromOffset(m.X, m.Y)
-	circle.Visible = Settings.Enabled and Settings.ShowFOV
+	circle.Visible = Settings.Enabled and Settings.ShowFOV and not Settings.IgnoreFOV
+	silentCircle.Position = UDim2.fromOffset(m.X, m.Y)
+	silentCircle.Visible = Settings.SilentAim and Settings.SilentShowFOV and not Settings.SilentIgnoreFOV
 
-	if savedCFrame and not Settings.Holding then
-		if os.clock() - aimEndedAt > RETURN_WINDOW then
-			savedCFrame = nil
-		else
-			local cur = Camera.CFrame
-			local angle = math.acos(math.clamp(cur.LookVector:Dot(savedCFrame.LookVector), -1, 1))
-			local mouseMoved = UserInputService:GetMouseDelta().Magnitude
-
-			if angle > JUMP_ANGLE and mouseMoved < 2 then
-
-				Camera.CFrame = CFrame.new(cur.Position) * (savedCFrame - savedCFrame.Position)
+	-- silent aim: pick the target and cache everything the spoof hooks hand out
+	if alive and Settings.SilentAim and not menuOpen then
+		local part = getTarget(Settings.SilentPart, Settings.SilentFOV, Settings.SilentIgnoreFOV, true)
+		if part then
+			silentTarget = part
+			silentPos = part.Position
+			silentCamPos = Camera.CFrame.Position
+			local sp = Camera:WorldToViewportPoint(silentPos)
+			if sp.Z > 0 then
+				silentScreen = Vector2.new(sp.X, sp.Y)
 			else
-				savedCFrame = cur
+				local vs = Camera.ViewportSize
+				silentScreen = Vector2.new(vs.X / 2, vs.Y / 2)
 			end
+		else
+			silentTarget = nil
 		end
+	else
+		silentTarget = nil
 	end
 
+	-- aimbot: moves the mouse onto the target (needs the mouse locked, so
+	-- nothing happens while the cursor is free)
 	local mouseLocked = UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
-	aiming = Settings.Enabled and Settings.Holding and mouseLocked and not menuOpen
+	local aiming = Settings.Enabled and Settings.Holding and mouseLocked and not menuOpen
 	if not aiming then return end
 
-	local target = getTarget()
+	local target = getTarget(Settings.AimPart, Settings.FOV, Settings.IgnoreFOV, false)
 	if not target then return end
 
 	local s = math.clamp(Settings.Smoothness / 100, 0, 0.98)
 	local alpha = 1 - s ^ (dt * 60)
 
-	local goal = CFrame.lookAt(Camera.CFrame.Position, target.Position)
-	Camera.CFrame = Camera.CFrame:Lerp(goal, alpha)
+	local sp, onScreen = Camera:WorldToViewportPoint(target.Position)
+	if not onScreen then return end
+	local delta = Vector2.new(sp.X, sp.Y) - m
+
+	if mousemoverel then
+		mousemoverel(delta.X * alpha, delta.Y * alpha)
+	else
+		-- fallback for executors without mousemoverel: turn the camera instead
+		local goal = CFrame.lookAt(Camera.CFrame.Position, target.Position)
+		Camera.CFrame = Camera.CFrame:Lerp(goal, alpha)
+	end
 end)
 
 local function cleanup()
@@ -3056,6 +3186,8 @@ local function cleanup()
 	Settings.Enabled = false
 	Settings.Holding = false
 	Settings.Triggerbot = false
+	Settings.SilentAim = false
+	silentTarget = nil
 	Settings.ESP = false
 	Settings.Chams = false
 	Settings.ShowNames = false
