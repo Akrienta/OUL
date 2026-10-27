@@ -1035,13 +1035,22 @@ local toastList = {}
 
 toast = function(richText)
 	toastOrder += 1
+
+	-- the slot is what the list layout positions; it grows from 0 height so
+	-- existing toasts glide up to make room instead of jumping
+	local slot = Instance.new("Frame")
+	slot.BackgroundTransparency = 1
+	slot.Size = UDim2.fromOffset(200, 0)
+	slot.LayoutOrder = toastOrder
+	slot.Parent = toastHolder
+
 	local t = Instance.new("CanvasGroup")
 	t.Size = UDim2.fromOffset(200, 26)
+	t.Position = UDim2.fromOffset(50, 0)
 	t.BorderSizePixel = 0
 	t.GroupTransparency = 1
-	t.LayoutOrder = toastOrder
 	t.ZIndex = 200
-	t.Parent = toastHolder
+	t.Parent = slot
 	bind(t, "BackgroundColor3", function()
 		return Theme.Background
 	end)
@@ -1062,20 +1071,30 @@ toast = function(richText)
 	l.Parent = t
 	themeText(l)
 
-	toastList[#toastList + 1] = t
+	toastList[#toastList + 1] = slot
 	while #toastList > 5 do
 		local old = table.remove(toastList, 1)
 		pcall(function() old:Destroy() end)
 	end
 
-	tween(t, { GroupTransparency = 0 }, FADE_IN)
+	local IN = TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+	local OUT = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+	local COLLAPSE = TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+
+	tween(slot, { Size = UDim2.fromOffset(200, 26) }, COLLAPSE)
+	tween(t, { GroupTransparency = 0, Position = UDim2.fromOffset(0, 0) }, IN)
+
 	task.delay(2.2, function()
-		if t.Parent then
-			tween(t, { GroupTransparency = 1 }, TweenInfo.new(0.3))
-			task.delay(0.35, function()
-				pcall(function() t:Destroy() end)
+		if not slot.Parent then return end
+		tween(t, { GroupTransparency = 1, Position = UDim2.fromOffset(50, 0) }, OUT)
+		task.delay(0.25, function()
+			if slot.Parent then
+				tween(slot, { Size = UDim2.fromOffset(200, 0) }, COLLAPSE)
+			end
+			task.delay(0.3, function()
+				pcall(function() slot:Destroy() end)
 			end)
-		end
+		end)
 	end)
 end
 
