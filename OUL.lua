@@ -172,6 +172,7 @@ local Settings = {
 }
 
 local setESPEnabled
+local printTeamInfo
 
 local VORTEX_DISABLED = true
 local LockedSettings = { FlyVortex = true }
@@ -532,6 +533,69 @@ else
 end
 end
 
+-- true only for living characters / NPCs. filters out corpses and ragdolls:
+-- zero health, Dead state, "dead" flags, clones named after a player, and
+-- anything sitting in a ragdoll / corpse style folder
+local CORPSE_WORDS = { "ragdoll", "corpse", "dead", "bodies", "debris", "gib" }
+local function isAlive(model)
+	local hum = model:FindFirstChildOfClass("Humanoid")
+	if not hum or hum.Health <= 0 then return false end
+	if hum:GetState() == Enum.HumanoidStateType.Dead then return false end
+	if model:GetAttribute("Dead") or model:GetAttribute("IsDead") or hum:GetAttribute("Dead") then
+		return false
+	end
+
+	if not Players:GetPlayerFromCharacter(model) then
+		-- a model named after a real player that isn't their character is a body clone
+		if Players:FindFirstChild(model.Name) then return false end
+		local node = model
+		while node and node ~= workspace do
+			local n = string.lower(node.Name)
+			for _, w in ipairs(CORPSE_WORDS) do
+				if string.find(n, w, 1, true) then return false end
+			end
+			node = node.Parent
+		end
+	end
+	return true
+end
+
+-- non-player humanoids (NPCs). always scanned; used by the aimbot, triggerbot and ESP
+local npcCache = {}
+task.spawn(function()
+	while alive do
+		local list = {}
+		for _, d in ipairs(workspace:GetDescendants()) do
+			if d:IsA("Humanoid") then
+				local model = d.Parent
+				if model and model:IsA("Model") and model ~= LocalPlayer.Character
+					and not Players:GetPlayerFromCharacter(model) and isAlive(model) then
+					list[#list + 1] = model
+				end
+			end
+		end
+		npcCache = list
+		task.wait(1)
+	end
+end)
+
+-- everything ESP draws: {key, character}; key is the Player, or the model for NPCs
+local function espEntities()
+	local list = {}
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer then
+			local c = plr.Character
+			list[#list + 1] = { plr, (c and isAlive(c)) and c or nil }
+		end
+	end
+	for _, model in ipairs(npcCache) do
+		if model.Parent and isAlive(model) then
+			list[#list + 1] = { model, model }
+		end
+	end
+	return list
+end
+
 local espFolder = Instance.new("Folder")
 espFolder.Name = "OULESP"
 espFolder.Parent = workspace
@@ -641,39 +705,49 @@ local function refreshESP()
 	local cam = workspace.CurrentCamera
 	local camPos = cam and cam.CFrame.Position or Vector3.zero
 	local list = {}
+	local seen = {}
 
-	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr ~= LocalPlayer then
-			local char = plr.Character
-			if char then
-				local h = highlights[plr]
-				if not h or not h.Parent or h.Adornee ~= char then
-					applyESP(plr, char)
-					h = highlights[plr]
-				end
-
-				local head = char:FindFirstChild("Head")
-				local tag = nameTags[plr]
-				if head and (not tag or not tag.Parent or tag.Adornee ~= head) then
-					applyTag(plr, char)
-					tag = nameTags[plr]
-				end
-				if tag then
-					tag.Enabled = Settings.ESP and Settings.ShowNames
-				end
-
-				local root = char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart
-				local dist = root and (root.Position - camPos).Magnitude or math.huge
-				if h then
-					table.insert(list, { h = h, dist = dist })
-				end
-			else
-				removeESP(plr)
+	for _, ent in ipairs(espEntities()) do
+		local key, char = ent[1], ent[2]
+		seen[key] = true
+		if char then
+			local h = highlights[key]
+			if not h or not h.Parent or h.Adornee ~= char then
+				applyESP(key, char)
+				h = highlights[key]
 			end
+
+			local head = char:FindFirstChild("Head")
+			local tag = nameTags[key]
+			if head and (not tag or not tag.Parent or tag.Adornee ~= head) then
+				applyTag(key, char)
+				tag = nameTags[key]
+			end
+			if tag then
+				tag.Enabled = Settings.ESP and Settings.ShowNames
+			end
+
+			local root = char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart
+			local dist = root and (root.Position - camPos).Magnitude or math.huge
+			if h then
+				table.insert(list, { h = h, dist = dist, npc = key:IsA("Model") })
+			end
+		else
+			removeESP(key)
 		end
 	end
 
+	-- drop ESP for NPCs that are gone
+	for key in pairs(highlights) do
+		if not seen[key] then removeESP(key) end
+	end
+	for key in pairs(nameTags) do
+		if not seen[key] then removeTag(key) end
+	end
+
+	-- players first, then nearest
 	table.sort(list, function(a, b)
+		if a.npc ~= b.npc then return not a.npc end
 		return a.dist < b.dist
 	end)
 	for i, item in ipairs(list) do
@@ -1895,11 +1969,9 @@ onTheme(function()
 	refreshTabs(true)
 end)
 
-local WHITE = Color3.fromRGB(255, 255, 255)
-local RED = Color3.fromRGB(255, 70, 70)
 
-local aimPage = newPage("combat_aimbot", true)
 do
+	local aimPage = newPage("combat_aimbot", true)
 	local g = newGroup(aimPage, 1, "Aimbot")
 	addCheckbox(g, "Enabled", "Enabled")
 	addCheckbox(g, "Ignore FOV", "IgnoreFOV")
@@ -1923,10 +1995,13 @@ do
 	end)
 	addNote(info, "range: 1000 studs")
 	addNote(info, "needs mouse lock")
+	addButton(info, "Print team info", Color3.fromRGB(70, 90, 140), Color3.fromRGB(90, 112, 170), function()
+		if printTeamInfo then printTeamInfo() end
+	end)
 end
 
-local trigPage = newPage("combat_trigger", true)
 do
+	local trigPage = newPage("combat_trigger", true)
 	local t = newGroup(trigPage, 1, "Triggerbot")
 	addCheckbox(t, "Enabled", "Triggerbot")
 	addSlider(t, "Delay (ms)", 0, 300, "TriggerDelay")
@@ -1960,8 +2035,8 @@ addPlaceholderPage("combat_antikatana", "Antikatana")
 
 addPlaceholderPage("combat_ragebot", "Ragebot")
 
-local espPage = newPage("visuals_esp", true)
 do
+	local espPage = newPage("visuals_esp", true)
 	local g = newGroup(espPage, 1, "ESP")
 	addCheckbox(g, "Enabled", "ESP", function()
 		setESPEnabled()
@@ -1984,8 +2059,8 @@ do
 	addNote(info, "colours are in Colours")
 end
 
-local colPage = newPage("visuals_colours", true)
 do
+	local colPage = newPage("visuals_colours", true)
 	local c1 = newGroup(colPage, 1, "Chams")
 	addColor(c1, "Cham Fill", paletteWith(ESPColors.Fill), setChamColor, ESPColors.Fill)
 	addColor(c1, "Cham Outline", paletteWith(ESPColors.Outline), setChamOutlineColor, ESPColors.Outline)
@@ -1999,8 +2074,8 @@ do
 	addColor(c2, "Usernames", paletteWith(ESPColors.Name), setNameColor, ESPColors.Name)
 end
 
-local flyPage = newPage("movement_fly", true)
 do
+	local flyPage = newPage("movement_fly", true)
 	local g = newGroup(flyPage, 1, "Fly")
 	addCheckbox(g, "Enabled", "Fly")
 	addSlider(g, "Speed", 5, 1000, "FlySpeed")
@@ -2014,8 +2089,8 @@ do
 	end)
 end
 
-local vortexPage = newPage("movement_vortex", true)
 do
+	local vortexPage = newPage("movement_vortex", true)
 	local g = newGroup(vortexPage, 1, "Vortex")
 	addCheckbox(g, "Vortex Mode", "FlyVortex")
 	addSlider(g, "Vortex Speed", 1, 20, "VortexSpeed")
@@ -2060,8 +2135,8 @@ do
 	end
 end
 
-local speedPage = newPage("movement_speed", true)
 do
+	local speedPage = newPage("movement_speed", true)
 	local g = newGroup(speedPage, 1, "Speed")
 	addCheckbox(g, "Enabled", "Speed")
 	addSlider(g, "Walk Speed", 16, 250, "SpeedValue")
@@ -2072,8 +2147,8 @@ do
 	addNote(info, "when you switch it off")
 end
 
-local jumpPage = newPage("movement_jump", true)
 do
+	local jumpPage = newPage("movement_jump", true)
 	local g = newGroup(jumpPage, 1, "Infinite Jump")
 	addCheckbox(g, "Enabled", "InfiniteJump")
 
@@ -2082,8 +2157,8 @@ do
 	addNote(info, "just press jump")
 end
 
-local noclipPage = newPage("movement_noclip", true)
 do
+	local noclipPage = newPage("movement_noclip", true)
 	local g = newGroup(noclipPage, 1, "Noclip")
 	addCheckbox(g, "Enabled", "Noclip")
 
@@ -2096,8 +2171,8 @@ do
 	addNote(info, "move through anything")
 end
 
-local settingsPage = newPage("settings_general", true)
 do
+	local settingsPage = newPage("settings_general", true)
 	local m = newGroup(settingsPage, 1, "Menu")
 	addSlider(m, "UI Transparency", 0, 70, "UITransparency", function(v)
 		if menuOpen then
@@ -2155,8 +2230,8 @@ do
 	end, outlineDefault, 0.45, 0.6)
 end
 
-local keyPage = newPage("settings_keybinds", true)
 do
+	local keyPage = newPage("settings_keybinds", true)
 	local function addKeybindRow(parent, id)
 		local b = getBind(id)
 		local row = Instance.new("Frame")
@@ -2253,15 +2328,117 @@ end)
 
 setMenuVisible(true)
 
+local canDamage
+do
+-- any attribute / value object whose name looks team-related counts as a team field
+local TEAM_WORDS = { "team", "squad", "faction", "side", "clan", "party", "alliance" }
+local NOT_TEAM_WORDS = { "kill", "score", "death", "point", "damage", "rank", "level", "win", "count", "size", "chat" }
+local function isTeamName(name)
+	local n = string.lower(name)
+	for _, w in ipairs(NOT_TEAM_WORDS) do
+		if string.find(n, w, 1, true) then return false end
+	end
+	for _, w in ipairs(TEAM_WORDS) do
+		if string.find(n, w, 1, true) then return true end
+	end
+	return false
+end
+
+local function collect(inst, out)
+	if not inst then return end
+	for k, v in pairs(inst:GetAttributes()) do
+		if out[k] == nil and isTeamName(k) then out[k] = v end
+	end
+	for _, c in ipairs(inst:GetChildren()) do
+		if c:IsA("ValueBase") and out[c.Name] == nil and isTeamName(c.Name) then
+			out[c.Name] = c.Value
+		end
+	end
+	local stats = inst:FindFirstChild("leaderstats")
+	if stats then
+		for _, c in ipairs(stats:GetChildren()) do
+			if c:IsA("ValueBase") and out[c.Name] == nil and isTeamName(c.Name) then
+				out[c.Name] = c.Value
+			end
+		end
+	end
+end
+
+-- true = teammate, false = enemy, nil = can't tell
+local function sameTeam(plr)
+	local me = LocalPlayer
+	-- 1) Roblox Teams service
+	if me.Team and plr.Team then
+		return me.Team == plr.Team
+	end
+	-- 2) any team-looking field on the player, their character, or leaderstats
+	local a, b = {}, {}
+	collect(me, a)
+	collect(me.Character, a)
+	collect(plr, b)
+	collect(plr.Character, b)
+	local differ = false
+	for k, v in pairs(a) do
+		if b[k] ~= nil then
+			if b[k] == v then return true end
+			differ = true
+		end
+	end
+	if differ then return false end
+	-- 3) plain TeamColor when both players are on a team
+	if not me.Neutral and not plr.Neutral then
+		return me.TeamColor == plr.TeamColor
+	end
+	return nil
+end
+
 -- returns false for players you cannot damage (teammates, spawn-protected).
 -- every combat feature should call this before picking a target.
-local function canDamage(plr)
+canDamage = function(plr)
 	if not Settings.TeamCheck then return true end
 	local char = plr.Character
 	if char and char:FindFirstChildOfClass("ForceField") then return false end
-	local myTeam, theirTeam = LocalPlayer.Team, plr.Team
-	if LocalPlayer.Neutral or plr.Neutral or not myTeam or not theirTeam then return true end
-	return myTeam ~= theirTeam
+	return sameTeam(plr) ~= true
+end
+
+local function allFields(inst)
+	if not inst then return "(none)" end
+	local t = {}
+	for k, v in pairs(inst:GetAttributes()) do t[#t + 1] = "@" .. k .. "=" .. tostring(v) end
+	for _, c in ipairs(inst:GetChildren()) do
+		if c:IsA("ValueBase") then t[#t + 1] = c.Name .. "=" .. tostring(c.Value) end
+	end
+	return #t > 0 and table.concat(t, ", ") or "(none)"
+end
+
+local function teamFields(plr)
+	local f = {}
+	collect(plr, f)
+	collect(plr.Character, f)
+	local t = {}
+	for k, v in pairs(f) do t[#t + 1] = k .. "=" .. tostring(v) end
+	return #t > 0 and table.concat(t, ", ") or "(none)"
+end
+
+printTeamInfo = function()
+	print("[OUL team] ===== you: " .. LocalPlayer.Name .. " =====")
+	print("[OUL team] Team:", LocalPlayer.Team, "| TeamColor:", LocalPlayer.TeamColor, "| Neutral:", LocalPlayer.Neutral)
+	print("[OUL team] team-like fields:", teamFields(LocalPlayer))
+	print("[OUL team] player values:", allFields(LocalPlayer))
+	print("[OUL team] character values:", allFields(LocalPlayer.Character))
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer then
+			print("[OUL team] ----- " .. plr.Name .. " -----")
+			print("[OUL team] Team:", plr.Team, "| TeamColor:", plr.TeamColor, "| Neutral:", plr.Neutral)
+			print("[OUL team] sameTeam:", sameTeam(plr), "| canDamage:", canDamage(plr))
+			print("[OUL team] team-like fields:", teamFields(plr))
+			print("[OUL team] player values:", allFields(plr))
+			print("[OUL team] character values:", allFields(plr.Character))
+		end
+	end
+	toast("Team info printed to Output")
+end
+
 end
 
 local function isVisible(part, character)
@@ -2276,7 +2453,7 @@ end
 
 local function getAimPart(char)
 	if Settings.AimPart == "Head" then
-		return char:FindFirstChild("Head")
+		return char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
 	end
 	return char:FindFirstChild("UpperTorso")
 		or char:FindFirstChild("Torso")
@@ -2293,23 +2470,38 @@ local function getTarget()
 	local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
 	local origin = myRoot and myRoot.Position or Camera.CFrame.Position
 
+	local function consider(char, plr)
+		local hum = char:FindFirstChildOfClass("Humanoid")
+		local part = getAimPart(char)
+		if not (hum and part and isAlive(char)) then return end
+		if plr then
+			if not canDamage(plr) then return end
+		elseif Settings.TeamCheck and char:FindFirstChildOfClass("ForceField") then
+			return
+		end
+		if (part.Position - origin).Magnitude > MAX_AIM_DISTANCE then return end
+		local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+		if not onScreen then return end
+		local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+		if dist < bestDist and isVisible(part, char) then
+			best, bestDist = part, dist
+		end
+	end
+
 	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr ~= LocalPlayer then
-			local char = plr.Character
-			local hum = char and char:FindFirstChildOfClass("Humanoid")
-			local part = char and getAimPart(char)
-			if hum and hum.Health > 0 and part and canDamage(plr)
-				and (part.Position - origin).Magnitude <= MAX_AIM_DISTANCE then
-				local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
-				if onScreen then
-					local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-					if dist < bestDist and isVisible(part, char) then
-						best, bestDist = part, dist
-					end
-				end
+		if plr ~= LocalPlayer and plr.Character then
+			consider(plr.Character, plr)
+		end
+	end
+
+	do
+		for _, model in ipairs(npcCache) do
+			if model.Parent then
+				consider(model, nil)
 			end
 		end
 	end
+
 	return best
 end
 
@@ -2353,11 +2545,27 @@ local function playerUnderCrosshair()
 	local result = workspace:Raycast(ray.Origin, ray.Direction * MAX_AIM_DISTANCE, params)
 	if not result then return nil end
 
+	-- walk up to the model that holds a humanoid
 	local model = result.Instance:FindFirstAncestorOfClass("Model")
-	local plr = model and Players:GetPlayerFromCharacter(model)
-	local hum = model and model:FindFirstChildOfClass("Humanoid")
-	if plr and plr ~= LocalPlayer and hum and hum.Health > 0 and canDamage(plr) then
-		return plr
+	while model and not model:FindFirstChildOfClass("Humanoid") do
+		model = model.Parent and model.Parent:FindFirstAncestorOfClass("Model")
+	end
+	if not model or model == LocalPlayer.Character then return nil end
+
+	local hum = model:FindFirstChildOfClass("Humanoid")
+	if not hum or not isAlive(model) then return nil end
+
+	local plr = Players:GetPlayerFromCharacter(model)
+	if plr then
+		if plr ~= LocalPlayer and canDamage(plr) then
+			return plr
+		end
+		return nil
+	end
+
+	do
+		if Settings.TeamCheck and model:FindFirstChildOfClass("ForceField") then return nil end
+		return model
 	end
 	return nil
 end
@@ -2438,9 +2646,17 @@ track(RunService.RenderStepped:Connect(function()
 	local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
 	local origin = myRoot and myRoot.Position or cam.CFrame.Position
 
-	for _, plr in ipairs(Players:GetPlayers()) do
+	local ents = espEntities()
+	local live = {}
+	for _, e in ipairs(ents) do live[e[1]] = true end
+	for k in pairs(tracerLines) do
+		if not live[k] then removeTracer(k) end
+	end
+
+	for _, ent in ipairs(ents) do
+		local plr = ent[1]
 		if plr ~= LocalPlayer then
-			local char = plr.Character
+			local char = ent[2]
 			local hum = char and char:FindFirstChildOfClass("Humanoid")
 			local root = char and char:FindFirstChild("HumanoidRootPart")
 			local line = tracerLines[plr]
@@ -2510,9 +2726,17 @@ track(RunService.RenderStepped:Connect(function()
 
 	local cam = workspace.CurrentCamera
 
-	for _, plr in ipairs(Players:GetPlayers()) do
+	local ents = espEntities()
+	local live = {}
+	for _, e in ipairs(ents) do live[e[1]] = true end
+	for k in pairs(boxFrames) do
+		if not live[k] then removeBox(k) end
+	end
+
+	for _, ent in ipairs(ents) do
+		local plr = ent[1]
 		if plr ~= LocalPlayer then
-			local char = plr.Character
+			local char = ent[2]
 			local hum = char and char:FindFirstChildOfClass("Humanoid")
 			local root = char and char:FindFirstChild("HumanoidRootPart")
 			local box = boxFrames[plr]
@@ -2651,6 +2875,8 @@ track(RunService.Stepped:Connect(function()
 	end
 end))
 
+local vortexRestoreAll, vortexRemote
+do
 local vortexStates = {}
 
 local function vortexCollides(j)
@@ -2737,7 +2963,7 @@ local function vortexRestore(plr)
 	vortexStates[plr] = nil
 end
 
-local function vortexRestoreAll()
+function vortexRestoreAll()
 	for plr in pairs(vortexStates) do
 		vortexRestore(plr)
 	end
@@ -2848,7 +3074,6 @@ track(RunService.Stepped:Connect(function()
 	end
 end))
 
-local vortexRemote
 task.spawn(function()
 	vortexRemote = game:GetService("ReplicatedStorage"):WaitForChild("OULVortexEvent", 5)
 end)
@@ -2952,6 +3177,7 @@ track(RunService.RenderStepped:Connect(function(dt)
 end))
 
 track(Players.PlayerRemoving:Connect(vortexRestore))
+end
 
 track(UserInputService.InputBegan:Connect(function(input, processed)
 	if rebinding then
