@@ -74,6 +74,79 @@ local SLIDE = TweenInfo.new(0.24, Enum.EasingStyle.Quint, Enum.EasingDirection.O
 
 local FONT = Enum.Font.RobotoMono
 
+-- ===== LOGO =====
+-- Option A: upload Neon_OUL_Circular_Tech_Emblem.png in Creator Hub and paste the ID here.
+-- Option B: put the PNG in your executor workspace folder named OUL_logo.png.
+-- If neither is set, a built-in purple/blue ring emblem is drawn instead, so it always shows something.
+local LOGO_ID = ""
+local LOGO_FILE = "OUL_logo.png"
+local LOGO_PURPLE = Color3.fromRGB(145, 90, 255)
+local LOGO_BLUE = Color3.fromRGB(50, 145, 255)
+
+local function makeLogo(parent, size, x, y, zIndex)
+	zIndex = zIndex or 101
+
+	local src
+	if LOGO_ID ~= "" then
+		src = "rbxassetid://" .. LOGO_ID
+	else
+		pcall(function()
+			if isfile and getcustomasset and isfile(LOGO_FILE) then
+				src = getcustomasset(LOGO_FILE)
+			end
+		end)
+	end
+
+	if src then
+		local img = Instance.new("ImageLabel")
+		img.Name = "OULLogo"
+		img.BackgroundTransparency = 1
+		img.BorderSizePixel = 0
+		img.Size = UDim2.fromOffset(size, size)
+		img.Position = UDim2.fromOffset(x, y)
+		img.ScaleType = Enum.ScaleType.Fit
+		img.Image = src
+		img.ZIndex = zIndex
+		img.Parent = parent
+		-- crops the PNG's black square background into a circle
+		Instance.new("UICorner", img).CornerRadius = UDim.new(1, 0)
+		return img
+	end
+
+	-- built-in emblem: gradient ring with "OUL" inside
+	local ring = Instance.new("Frame")
+	ring.Name = "OULLogo"
+	ring.BackgroundTransparency = 1
+	ring.BorderSizePixel = 0
+	ring.Size = UDim2.fromOffset(size, size)
+	ring.Position = UDim2.fromOffset(x, y)
+	ring.ZIndex = zIndex
+	ring.Parent = parent
+	Instance.new("UICorner", ring).CornerRadius = UDim.new(1, 0)
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(255, 255, 255)
+	stroke.Thickness = math.max(1.5, size / 10)
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Parent = ring
+
+	local grad = Instance.new("UIGradient")
+	grad.Color = ColorSequence.new(LOGO_PURPLE, LOGO_BLUE)
+	grad.Rotation = 45
+	grad.Parent = stroke
+
+	local lbl = Instance.new("TextLabel")
+	lbl.BackgroundTransparency = 1
+	lbl.Size = UDim2.new(1, 0, 1, 0)
+	lbl.Text = "OUL"
+	lbl.Font = Enum.Font.GothamBold
+	lbl.TextSize = math.max(6, math.floor(size * 0.36))
+	lbl.TextColor3 = Color3.fromRGB(240, 242, 252)
+	lbl.ZIndex = zIndex
+	lbl.Parent = ring
+	return ring
+end
+
 local function tween(obj, props, info)
 	TweenService:Create(obj, info or EASE, props):Play()
 end
@@ -88,12 +161,13 @@ local function apply(obj, props, animate)
 	end
 end
 
+-- default theme matches the OUL logo: near-black navy, purple-to-blue accents, white text
 local Theme = {
-	Text = Color3.fromRGB(150, 210, 255),
-	Switch = Color3.fromRGB(70, 160, 100),
-	Accent = Color3.fromRGB(95, 140, 255),
-	Background = Color3.fromRGB(18, 18, 23),
-	Outline = Color3.fromRGB(52, 52, 66),
+	Text = Color3.fromRGB(228, 232, 255),
+	Switch = Color3.fromRGB(88, 122, 255),
+	Accent = Color3.fromRGB(140, 95, 255),
+	Background = Color3.fromRGB(8, 9, 20),
+	Outline = Color3.fromRGB(44, 46, 86),
 	Dim = Color3.fromRGB(110, 165, 210),
 	Field = Color3.fromRGB(34, 34, 42),
 	Group = Color3.fromRGB(22, 22, 28),
@@ -169,6 +243,11 @@ local Settings = {
 	SpeedValue = 40,
 	InfiniteJump = false,
 	Notifications = true,
+	TargetNPCs = true, -- Target Zombies (aimbot + triggerbot)
+	ESPNPCs = true, -- Zombie/NPC ESP
+	MouseTP = true,
+	MouseTPRange = 1000,
+	KeybindList = true,
 }
 
 local setESPEnabled
@@ -183,6 +262,8 @@ local DisplayNames = {
 	Boxes = "Boxes", BoxFill = "Box Fill", Fly = "Fly", FlyVortex = "Vortex",
 	Noclip = "Noclip", Speed = "Speed", InfiniteJump = "Infinite Jump",
 	Watermark = "Watermark", BlurEnabled = "Background Blur", Notifications = "Notifications",
+	TargetNPCs = "Target Zombies/NPCS", ESPNPCs = "Zombie/NPC ESP",
+	MouseTP = "Mouse TP", KeybindList = "Keybind List",
 }
 
 local Binds = {}
@@ -193,7 +274,7 @@ defBind("menu", "Menu", "menu", nil, Enum.KeyCode.End)
 defBind("aim", "Aim (hold)", "hold", nil, Enum.UserInputType.MouseButton2)
 for _, k in ipairs({
 	"Enabled", "ShowFOV", "IgnoreFOV", "TeamCheck", "Triggerbot", "ESP", "Chams", "ShowNames", "Tracers", "Boxes",
-	"BoxFill", "Fly", "Noclip", "Speed", "InfiniteJump", "Watermark", "BlurEnabled", "Notifications",
+	"BoxFill", "Fly", "Noclip", "Speed", "InfiniteJump", "Watermark", "BlurEnabled", "Notifications", "KeybindList",
 }) do
 	local default
 	if k == "Triggerbot" then default = Enum.KeyCode.P end
@@ -201,6 +282,7 @@ for _, k in ipairs({
 	if k == "Noclip" then default = Enum.KeyCode.N end
 	defBind(k, DisplayNames[k], "toggle", k, default)
 end
+defBind("MouseTPKey", "Mouse TP", "press", nil, Enum.KeyCode.T)
 
 local function getBind(id)
 	for _, b in ipairs(Binds) do
@@ -282,19 +364,36 @@ local saveStatusText = "saving: connecting..."
 local saveStatusLabel
 local saveNowFn = function() end
 
+-- remembered on-screen positions (watermark + keybind list). nil = use the default spot
+local Positions = {}
+local function posToArr(p)
+	return { p.X.Scale, p.X.Offset, p.Y.Scale, p.Y.Offset }
+end
+local function arrToPos(a)
+	if type(a) ~= "table" then return nil end
+	for i = 1, 4 do
+		if type(a[i]) ~= "number" or a[i] ~= a[i] then return nil end
+	end
+	return UDim2.new(math.clamp(a[1], 0, 1), math.clamp(a[2], -4000, 4000), math.clamp(a[3], 0, 1), math.clamp(a[4], -4000, 4000))
+end
+
 do
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+-- save format version. v2 = logo-matched default theme; older saves keep their settings
+-- but their old menu colours are ignored once so the new look shows up
+local SAVE_VERSION = 2
+
 local SAVE_BOOLS = {
 	"Enabled", "IgnoreFOV", "TeamCheck", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
 	"Boxes", "BoxFill", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed",
-	"InfiniteJump", "Notifications",
+	"InfiniteJump", "Notifications", "TargetNPCs", "ESPNPCs", "MouseTP", "KeybindList",
 }
 local SAVE_NUMBERS = {
 	FOV = { 20, 500 }, Smoothness = { 1, 100 }, TriggerDelay = { 0, 300 },
 	BlurAmount = { 1, 56 }, UITransparency = { 0, 70 }, FlySpeed = { 5, 1000 },
-	VortexSpeed = { 1, 20 }, VortexRadius = { 2, 14 }, SpeedValue = { 16, 250 },
+	VortexSpeed = { 1, 20 }, VortexRadius = { 2, 14 }, SpeedValue = { 16, 250 }, MouseTPRange = { 50, 1000 },
 }
 local SAVE_THEME = { "Text", "Switch", "Accent", "Background", "Outline" }
 local SAVE_ESP = { "Fill", "Outline", "Tracer", "Name", "Box", "BoxFill" }
@@ -328,7 +427,7 @@ local function stringToInput(str)
 end
 
 local function takeSnapshot()
-	local snap = { v = 1, settings = {}, theme = {}, esp = {}, binds = {} }
+	local snap = { v = SAVE_VERSION, settings = {}, theme = {}, esp = {}, binds = {}, pos = {} }
 	for _, k in ipairs(SAVE_BOOLS) do
 		snap.settings[k] = Settings[k] and true or false
 	end
@@ -343,6 +442,8 @@ local function takeSnapshot()
 		snap.esp[k] = colorToArr(ESPColors[k])
 	end
 	snap.fov = colorToArr(FOVColor)
+	if Positions.hud then snap.pos.hud = posToArr(Positions.hud) end
+	if Positions.keylist then snap.pos.keylist = posToArr(Positions.keylist) end
 	for _, b in ipairs(Binds) do
 		snap.binds[b.id] = inputToString(b.input)
 	end
@@ -361,12 +462,15 @@ local function applySaved(d)
 	end
 	if s.AimPart == "Head" or s.AimPart == "Body" then Settings.AimPart = s.AimPart end
 
-	local t = type(d.theme) == "table" and d.theme or {}
-	for _, k in ipairs(SAVE_THEME) do
-		local c = arrToColor(t[k])
-		if c then Theme[k] = c end
+	-- old (pre-logo) saves keep the new default theme; saves from now on keep your picked colours
+	if type(d.v) == "number" and d.v >= SAVE_VERSION then
+		local t = type(d.theme) == "table" and d.theme or {}
+		for _, k in ipairs(SAVE_THEME) do
+			local c = arrToColor(t[k])
+			if c then Theme[k] = c end
+		end
+		deriveTheme()
 	end
-	deriveTheme()
 
 	local e = type(d.esp) == "table" and d.esp or {}
 	for _, k in ipairs(SAVE_ESP) do
@@ -374,6 +478,10 @@ local function applySaved(d)
 		if c then ESPColors[k] = c end
 	end
 	FOVColor = arrToColor(d.fov) or FOVColor
+
+	local p = type(d.pos) == "table" and d.pos or {}
+	Positions.hud = arrToPos(p.hud)
+	Positions.keylist = arrToPos(p.keylist)
 
 	local b = type(d.binds) == "table" and d.binds or {}
 	for _, bind in ipairs(Binds) do
@@ -588,9 +696,11 @@ local function espEntities()
 			list[#list + 1] = { plr, (c and isAlive(c)) and c or nil }
 		end
 	end
-	for _, model in ipairs(npcCache) do
-		if model.Parent and isAlive(model) then
-			list[#list + 1] = { model, model }
+	if Settings.ESPNPCs then
+		for _, model in ipairs(npcCache) do
+			if model.Parent and isAlive(model) then
+				list[#list + 1] = { model, model }
+			end
 		end
 	end
 	return list
@@ -874,7 +984,7 @@ end
 
 local SIDE_W = 96
 local PANEL_W = SIDE_W + 440
-local TITLE_H = 28
+local TITLE_H = 38
 local TAB_ROW = 30
 local PAGE_X = SIDE_W + 8
 local PAGE_Y = TITLE_H + 8
@@ -914,12 +1024,7 @@ titleBar.BackgroundTransparency = 1
 titleBar.Active = true
 titleBar.Parent = panel
 
-local title = newLabel(titleBar, "OUL", 15)
-title.Position = UDim2.new(0, 12, 0, 2)
-title.Size = UDim2.new(1, -24, 1, -2)
-pcall(function()
-	title.FontFace = Font.new("rbxasset://fonts/families/RobotoMono.json", Enum.FontWeight.Bold)
-end)
+makeLogo(titleBar, 26, 10, (TITLE_H - 26) / 2)
 
 local TAB_NAMES = { "combat", "visuals", "movement", "settings" }
 local TAB_LABELS = { combat = "Combat", visuals = "Visuals", movement = "Movement", settings = "Settings" }
@@ -934,7 +1039,7 @@ local SUBTABS = {
 	},
 	visuals = { { id = "esp", label = "ESP" }, { id = "colours", label = "Colours" } },
 	settings = { { id = "general", label = "General" }, { id = "keybinds", label = "Keybinds" } },
-	movement = { { id = "fly", label = "Fly" }, { id = "vortex", label = "Vortex", disabled = true }, { id = "noclip", label = "Noclip" }, { id = "speed", label = "Speed" }, { id = "jump", label = "Jump" } },
+	movement = { { id = "fly", label = "Fly" }, { id = "vortex", label = "Vortex", disabled = true }, { id = "noclip", label = "Noclip" }, { id = "speed", label = "Speed" }, { id = "jump", label = "Jump" }, { id = "mousetp", label = "Mouse TP" } },
 }
 local SUB_H = 26
 local SUB_W = 80
@@ -982,12 +1087,18 @@ addHint(footer, function()
 end)
 
 local hud = Instance.new("TextLabel")
-hud.Size = UDim2.fromOffset(132, 22)
+hud.Size = UDim2.fromOffset(112, 32)
 hud.AnchorPoint = Vector2.new(1, 0)
-hud.Position = UDim2.new(1, -10, 0, 8)
+hud.Position = Positions.hud or UDim2.new(1, -10, 0, 8)
 hud.BackgroundTransparency = 0.15
 hud.BorderSizePixel = 0
-hud.Text = "OUL  |  FPS : --"
+hud.Text = "FPS : --"
+hud.TextXAlignment = Enum.TextXAlignment.Right
+do
+	local hudPad = Instance.new("UIPadding")
+	hudPad.PaddingRight = UDim.new(0, 12)
+	hudPad.Parent = hud
+end
 hud.Font = FONT
 hud.TextSize = 12
 hud.Visible = Settings.Watermark
@@ -998,6 +1109,7 @@ bind(hud, "BackgroundColor3", function()
 end)
 themeText(hud)
 corner(hud, 4)
+makeLogo(hud, 24, 6, 4)
 do
 	local s = Instance.new("UIStroke")
 	s.Thickness = 1
@@ -1025,6 +1137,9 @@ do
 	end))
 	track(UserInputService.InputEnded:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			if dragging then
+				Positions.hud = hud.Position
+			end
 			dragging = false
 		end
 	end))
@@ -1036,8 +1151,149 @@ do
 		frames += 1
 		elapsed += dt
 		if elapsed >= 0.5 then
-			hud.Text = "OUL  |  FPS : " .. math.floor(frames / elapsed + 0.5)
+			hud.Text = "FPS : " .. math.floor(frames / elapsed + 0.5)
 			frames, elapsed = 0, 0
+		end
+	end))
+end
+
+-- ===== KEYBIND LIST (draggable, position is saved) =====
+local keyList = Instance.new("Frame")
+keyList.Name = "KeybindList"
+keyList.Size = UDim2.fromOffset(150, 0)
+keyList.AutomaticSize = Enum.AutomaticSize.XY
+keyList.Position = Positions.keylist or UDim2.new(0, 10, 0.35, 0)
+keyList.BackgroundTransparency = 0.15
+keyList.BorderSizePixel = 0
+keyList.Active = true
+keyList.Visible = Settings.KeybindList
+keyList.ZIndex = 100
+keyList.Parent = gui
+bind(keyList, "BackgroundColor3", function()
+	return Theme.Background
+end)
+corner(keyList, 4)
+do
+	local s = Instance.new("UIStroke")
+	s.Thickness = 1
+	s.Transparency = 0.35
+	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	s.Parent = keyList
+	bind(s, "Color", function()
+		return Theme.Accent
+	end)
+
+	local layout = Instance.new("UIListLayout")
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 2)
+	layout.Parent = keyList
+
+	local pad = Instance.new("UIPadding")
+	pad.PaddingTop = UDim.new(0, 5)
+	pad.PaddingBottom = UDim.new(0, 6)
+	pad.PaddingLeft = UDim.new(0, 8)
+	pad.PaddingRight = UDim.new(0, 8)
+	pad.Parent = keyList
+end
+
+do
+	local head = newLabel(keyList, "Keybinds", 12)
+	head.Size = UDim2.fromOffset(0, 16)
+	head.AutomaticSize = Enum.AutomaticSize.X
+	head.LayoutOrder = 0
+	head.ZIndex = 101
+	bind(head, "TextColor3", function()
+		return Theme.Accent
+	end)
+	pcall(function()
+		head.FontFace = Font.new("rbxasset://fonts/families/RobotoMono.json", Enum.FontWeight.Bold)
+	end)
+end
+
+do
+	local dragging, dragStart, startPos
+	keyList.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			dragging, dragStart, startPos = true, input.Position, keyList.Position
+		end
+	end)
+	track(UserInputService.InputChanged:Connect(function(input)
+		if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+			local d = input.Position - dragStart
+			keyList.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+		end
+	end))
+	track(UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			if dragging then
+				Positions.keylist = keyList.Position
+			end
+			dragging = false
+		end
+	end))
+end
+
+do
+	-- menu-only options aren't cheats, so they stay off the list
+	local SKIP = { menu = true, Watermark = true, BlurEnabled = true, Notifications = true, KeybindList = true }
+	local rows = {}
+	local lastSig
+	local timer = 0
+
+	local function rebuild()
+		local entries, sig = {}, {}
+		for _, b in ipairs(Binds) do
+			if b.input and not SKIP[b.id] then
+				local on, tag
+				if b.kind == "toggle" then
+					on, tag = Settings[b.key] and true or false, "Toggle"
+				elseif b.kind == "hold" then
+					on, tag = Settings.Holding and true or false, "Hold"
+				else
+					on, tag = false, "Press"
+				end
+				local name = string.gsub(b.label, "%s*%(hold%)", "")
+				local text = "[" .. keyName(b.input) .. "] " .. name .. " (" .. tag .. ")"
+				entries[#entries + 1] = { text = text, on = on }
+				sig[#sig + 1] = text .. (on and "1" or "0")
+			end
+		end
+
+		local s = table.concat(sig, "|")
+		if s == lastSig then return end
+		lastSig = s
+
+		for _, r in ipairs(rows) do
+			r:Destroy()
+		end
+		rows = {}
+		for i, e in ipairs(entries) do
+			local l = Instance.new("TextLabel")
+			l.BackgroundTransparency = 1
+			l.Size = UDim2.fromOffset(0, 14)
+			l.AutomaticSize = Enum.AutomaticSize.X
+			l.LayoutOrder = i
+			l.Font = FONT
+			l.TextSize = 12
+			l.TextXAlignment = Enum.TextXAlignment.Left
+			l.Text = e.text
+			l.TextColor3 = e.on and Theme.Accent or Theme.Dim
+			l.ZIndex = 101
+			l.Parent = keyList
+			rows[i] = l
+		end
+	end
+
+	onTheme(function()
+		lastSig = nil
+	end)
+
+	track(RunService.Heartbeat:Connect(function(dt)
+		timer += dt
+		if timer < 0.1 then return end
+		timer = 0
+		if Settings.KeybindList then
+			rebuild()
 		end
 	end))
 end
@@ -1548,6 +1804,7 @@ local PALETTE = {
 }
 
 local BACKGROUNDS = {
+	Color3.fromRGB(8, 9, 20), -- OUL logo navy (default)
 	Color3.fromRGB(18, 18, 23),
 	Color3.fromRGB(8, 8, 10),
 	Color3.fromRGB(30, 30, 30),
@@ -1561,7 +1818,6 @@ local BACKGROUNDS = {
 	Color3.fromRGB(44, 20, 24),
 	Color3.fromRGB(44, 16, 40),
 	Color3.fromRGB(32, 20, 48),
-	Color3.fromRGB(60, 36, 60),
 	Color3.fromRGB(210, 216, 230),
 	Color3.fromRGB(235, 238, 245),
 }
@@ -1900,6 +2156,7 @@ for i, name in ipairs(TAB_NAMES) do
 end
 
 for tabId, subs in pairs(SUBTABS) do
+	local subW = math.min(SUB_W, math.floor((PANEL_W - PAGE_X - 8) / #subs))
 	local bar = Instance.new("Frame")
 	bar.BackgroundTransparency = 1
 	bar.Size = UDim2.new(1, -(PAGE_X + 8), 0, SUB_H - 4)
@@ -1918,7 +2175,7 @@ for tabId, subs in pairs(SUBTABS) do
 	end)
 
 	local line = Instance.new("Frame")
-	line.Size = UDim2.fromOffset(SUB_W - 12, 2)
+	line.Size = UDim2.fromOffset(subW - 12, 2)
 	line.Position = UDim2.fromOffset(6, SUB_H - 8)
 	line.BorderSizePixel = 0
 	line.ZIndex = 3
@@ -1933,9 +2190,9 @@ for tabId, subs in pairs(SUBTABS) do
 	local x = 0
 	for i, sub in ipairs(subs) do
 		subIndex[tabId][sub.id] = i
-		subPos[tabId][sub.id] = { x = x, w = SUB_W }
+		subPos[tabId][sub.id] = { x = x, w = subW }
 		local sb = Instance.new("TextButton")
-		sb.Size = UDim2.fromOffset(SUB_W, SUB_H - 8)
+		sb.Size = UDim2.fromOffset(subW, SUB_H - 8)
 		sb.Position = UDim2.fromOffset(x, 0)
 		sb.BackgroundTransparency = 1
 		sb.Text = sub.label
@@ -1960,7 +2217,7 @@ for tabId, subs in pairs(SUBTABS) do
 			end
 		end)
 
-		x = x + SUB_W
+		x = x + subW
 	end
 	subBars[tabId] = { frame = bar, line = line }
 end
@@ -1976,6 +2233,7 @@ do
 	addCheckbox(g, "Enabled", "Enabled")
 	addCheckbox(g, "Ignore FOV", "IgnoreFOV")
 	addCheckbox(g, "Team Check", "TeamCheck")
+	addCheckbox(g, "Target Zombies/NPCS", "TargetNPCs")
 	addSlider(g, "FOV", 20, 500, "FOV", function(v)
 		circle.Size = UDim2.fromOffset(v * 2, v * 2)
 	end)
@@ -2050,6 +2308,7 @@ do
 	addCheckbox(g, "Tracers", "Tracers")
 	addCheckbox(g, "Boxes", "Boxes")
 	addCheckbox(g, "Box Fill", "BoxFill")
+	addCheckbox(g, "Zombie/NPC ESP", "ESPNPCs")
 
 	local info = newGroup(espPage, 2, "Info")
 	addNote(info, "chams show through walls")
@@ -2158,6 +2417,22 @@ do
 end
 
 do
+	local tpPage = newPage("movement_mousetp", true)
+	local g = newGroup(tpPage, 1, "Mouse TP")
+	addCheckbox(g, "Enabled", "MouseTP")
+	addSlider(g, "Max Range", 50, 1000, "MouseTPRange")
+
+	local info = newGroup(tpPage, 2, "Info")
+	addHint(addNote(info, ""), function()
+		return keyName(getBind("MouseTPKey").input) .. "  -  teleport"
+	end)
+	addNote(info, "teleports you to where")
+	addNote(info, "your mouse / crosshair")
+	addNote(info, "is pointing")
+	addNote(info, "change the key in Keybinds")
+end
+
+do
 	local noclipPage = newPage("movement_noclip", true)
 	local g = newGroup(noclipPage, 1, "Noclip")
 	addCheckbox(g, "Enabled", "Noclip")
@@ -2181,6 +2456,9 @@ do
 	end)
 	addCheckbox(m, "Watermark", "Watermark", function(on)
 		hud.Visible = on
+	end)
+	addCheckbox(m, "Keybind List", "KeybindList", function(on)
+		keyList.Visible = on
 	end)
 	addCheckbox(m, "Notifications", "Notifications")
 	addCheckbox(m, "Background Blur", "BlurEnabled", function()
@@ -2275,7 +2553,7 @@ do
 	end
 
 	local mv = newGroup(keyPage, 1, "Movement")
-	for _, id in ipairs({ "Fly", "Noclip", "Speed", "InfiniteJump" }) do
+	for _, id in ipairs({ "Fly", "Noclip", "Speed", "InfiniteJump", "MouseTPKey" }) do
 		addKeybindRow(mv, id)
 	end
 
@@ -2285,7 +2563,7 @@ do
 	end
 
 	local m = newGroup(keyPage, 2, "Menu")
-	for _, id in ipairs({ "menu", "Watermark", "BlurEnabled", "Notifications" }) do
+	for _, id in ipairs({ "menu", "Watermark", "KeybindList", "BlurEnabled", "Notifications" }) do
 		addKeybindRow(m, id)
 	end
 	addNote(m, "click a key, then press a new one")
@@ -2494,7 +2772,7 @@ local function getTarget()
 		end
 	end
 
-	do
+	if Settings.TargetNPCs then
 		for _, model in ipairs(npcCache) do
 			if model.Parent then
 				consider(model, nil)
@@ -2563,11 +2841,9 @@ local function playerUnderCrosshair()
 		return nil
 	end
 
-	do
-		if Settings.TeamCheck and model:FindFirstChildOfClass("ForceField") then return nil end
-		return model
-	end
-	return nil
+	if not Settings.TargetNPCs then return nil end
+	if Settings.TeamCheck and model:FindFirstChildOfClass("ForceField") then return nil end
+	return model
 end
 
 local function fireClick()
@@ -2874,6 +3150,34 @@ track(RunService.Stepped:Connect(function()
 		noclipRestore()
 	end
 end))
+
+local function mouseTeleport()
+	if not Settings.MouseTP or menuOpen then return end
+	local char = LocalPlayer.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not (hum and root and hum.Health > 0) then return end
+
+	local cam = workspace.CurrentCamera
+	local m = UserInputService:GetMouseLocation()
+	local ray = cam:ViewportPointToRay(m.X, m.Y)
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { char }
+
+	local result = workspace:Raycast(ray.Origin, ray.Direction * Settings.MouseTPRange, params)
+	if not result then
+		if toast then toast("Mouse TP  -  nothing in range") end
+		return
+	end
+
+	-- stand on the surface instead of inside it
+	local lift = Vector3.new(0, hum.HipHeight + root.Size.Y / 2, 0)
+	local pos = result.Position + result.Normal * 2 + lift
+	root.CFrame = CFrame.new(pos) * (root.CFrame - root.CFrame.Position)
+	root.AssemblyLinearVelocity = Vector3.zero
+end
 
 local vortexRestoreAll, vortexRemote
 do
@@ -3233,6 +3537,8 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 				setMenuVisible(not menuOpen)
 			elseif b.kind == "hold" then
 				Settings.Holding = true
+			elseif b.kind == "press" then
+				mouseTeleport()
 			end
 		end
 	end
