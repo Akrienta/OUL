@@ -246,8 +246,9 @@ local Settings = {
 	TargetNPCs = true, -- Target Zombies (aimbot + triggerbot)
 	ESPNPCs = true, -- Zombie/NPC ESP
 	MouseTP = true,
-	MouseTPRange = 1000,
 	KeybindList = true,
+	Ragebot = false, -- stay behind the closest player
+	RageDistance = 4, -- studs behind the target
 }
 
 local setESPEnabled
@@ -264,6 +265,7 @@ local DisplayNames = {
 	Watermark = "Watermark", BlurEnabled = "Background Blur", Notifications = "Notifications",
 	TargetNPCs = "Target Zombies/NPCS", ESPNPCs = "Zombie/NPC ESP",
 	MouseTP = "Mouse TP", KeybindList = "Keybind List",
+	Ragebot = "Ragebot",
 }
 
 local Binds = {}
@@ -273,7 +275,7 @@ end
 defBind("menu", "Menu", "menu", nil, Enum.KeyCode.End)
 defBind("aim", "Aim (hold)", "hold", nil, Enum.UserInputType.MouseButton2)
 for _, k in ipairs({
-	"Enabled", "ShowFOV", "IgnoreFOV", "TeamCheck", "Triggerbot", "ESP", "Chams", "ShowNames", "Tracers", "Boxes",
+	"Enabled", "ShowFOV", "IgnoreFOV", "TeamCheck", "Triggerbot", "Ragebot", "ESP", "Chams", "ShowNames", "Tracers", "Boxes",
 	"BoxFill", "Fly", "Noclip", "Speed", "InfiniteJump", "Watermark", "BlurEnabled", "Notifications", "KeybindList",
 }) do
 	local default
@@ -347,6 +349,7 @@ local toggles = {}
 local notify
 local toast
 local vortexStatus, vortexServerLabel
+local rageStatus
 
 local MAX_HIGHLIGHTS = 30
 local ESPColors = {
@@ -388,12 +391,13 @@ local SAVE_VERSION = 2
 local SAVE_BOOLS = {
 	"Enabled", "IgnoreFOV", "TeamCheck", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
 	"Boxes", "BoxFill", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed",
-	"InfiniteJump", "Notifications", "TargetNPCs", "ESPNPCs", "MouseTP", "KeybindList",
+	"InfiniteJump", "Notifications", "TargetNPCs", "ESPNPCs", "MouseTP", "KeybindList", "Ragebot",
 }
 local SAVE_NUMBERS = {
 	FOV = { 20, 500 }, Smoothness = { 1, 100 }, TriggerDelay = { 0, 300 },
 	BlurAmount = { 1, 56 }, UITransparency = { 0, 70 }, FlySpeed = { 5, 1000 },
-	VortexSpeed = { 1, 20 }, VortexRadius = { 2, 14 }, SpeedValue = { 16, 250 }, MouseTPRange = { 50, 1000 },
+	VortexSpeed = { 1, 20 }, VortexRadius = { 2, 14 }, SpeedValue = { 16, 250 },
+	RageDistance = { 2, 20 },
 }
 local SAVE_THEME = { "Text", "Switch", "Accent", "Background", "Outline" }
 local SAVE_ESP = { "Fill", "Outline", "Tracer", "Name", "Box", "BoxFill" }
@@ -2291,7 +2295,22 @@ addPlaceholderPage("combat_silent", "Silent Aim")
 
 addPlaceholderPage("combat_antikatana", "Antikatana")
 
-addPlaceholderPage("combat_ragebot", "Ragebot")
+do
+	local ragePage = newPage("combat_ragebot", true)
+	local g = newGroup(ragePage, 1, "Ragebot")
+	addCheckbox(g, "Stay Behind Closest", "Ragebot")
+	addSlider(g, "Distance", 2, 20, "RageDistance")
+
+	local info = newGroup(ragePage, 2, "Info")
+	rageStatus = addNote(info, "Target: none")
+	addHint(addNote(info, ""), function()
+		return keyName(getBind("Ragebot").input) .. "  -  ragebot on / off"
+	end)
+	addNote(info, "keeps you behind the")
+	addNote(info, "closest player, facing")
+	addNote(info, "the same way they do")
+	addNote(info, "uses Team Check")
+end
 
 do
 	local espPage = newPage("visuals_esp", true)
@@ -2420,7 +2439,6 @@ do
 	local tpPage = newPage("movement_mousetp", true)
 	local g = newGroup(tpPage, 1, "Mouse TP")
 	addCheckbox(g, "Enabled", "MouseTP")
-	addSlider(g, "Max Range", 50, 1000, "MouseTPRange")
 
 	local info = newGroup(tpPage, 2, "Info")
 	addHint(addNote(info, ""), function()
@@ -2548,7 +2566,7 @@ do
 	end
 
 	local c = newGroup(keyPage, 1, "Combat")
-	for _, id in ipairs({ "aim", "Enabled", "ShowFOV", "IgnoreFOV", "TeamCheck", "Triggerbot" }) do
+	for _, id in ipairs({ "aim", "Enabled", "ShowFOV", "IgnoreFOV", "TeamCheck", "Triggerbot", "Ragebot" }) do
 		addKeybindRow(c, id)
 	end
 
@@ -3166,7 +3184,7 @@ local function mouseTeleport()
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = { char }
 
-	local result = workspace:Raycast(ray.Origin, ray.Direction * Settings.MouseTPRange, params)
+	local result = workspace:Raycast(ray.Origin, ray.Direction * 10000, params)
 	if not result then
 		if toast then toast("Mouse TP  -  nothing in range") end
 		return
@@ -3178,6 +3196,72 @@ local function mouseTeleport()
 	root.CFrame = CFrame.new(pos) * (root.CFrame - root.CFrame.Position)
 	root.AssemblyLinearVelocity = Vector3.zero
 end
+
+-- ===== RAGEBOT: stay behind the closest player =====
+-- every frame: find the closest living (damageable) player, then place your character
+-- RageDistance studs directly behind them, facing the same way they face.
+-- runs after the Fly loop so it takes priority over fly movement.
+local rageTarget = nil
+local rageShown = nil
+
+local function getRageTarget(myRoot)
+	local best, bestScore
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer then
+			local char = plr.Character
+			local root = char and char:FindFirstChild("HumanoidRootPart")
+			if root and isAlive(char) and canDamage(plr) then
+				local score = (root.Position - myRoot.Position).Magnitude
+				-- current target gets a bonus so it doesn't flicker between two close players
+				if rageTarget and rageTarget.root == root then
+					score -= 8
+				end
+				if not bestScore or score < bestScore then
+					best, bestScore = { root = root, name = plr.Name }, score
+				end
+			end
+		end
+	end
+	return best
+end
+
+local function setRageStatus(text)
+	if rageStatus and rageShown ~= text then
+		rageShown = text
+		rageStatus.Text = text
+	end
+end
+
+track(RunService.Stepped:Connect(function()
+	if not Settings.Ragebot then
+		rageTarget = nil
+		setRageStatus("Target: none")
+		return
+	end
+
+	local char = LocalPlayer.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local myRoot = char and char:FindFirstChild("HumanoidRootPart")
+	if not (hum and myRoot and hum.Health > 0) then return end
+
+	rageTarget = getRageTarget(myRoot)
+	if not rageTarget then
+		setRageStatus("Target: none found")
+		return
+	end
+	setRageStatus("Target: " .. rageTarget.name)
+
+	local look = rageTarget.root.CFrame.LookVector
+	local flat = Vector3.new(look.X, 0, look.Z)
+	if flat.Magnitude < 0.01 then return end
+	flat = flat.Unit
+
+	-- stand directly behind them, facing the same way they face
+	local pos = rageTarget.root.Position - flat * Settings.RageDistance
+	myRoot.CFrame = CFrame.lookAt(pos, pos + flat)
+	myRoot.AssemblyLinearVelocity = Vector3.zero
+	myRoot.AssemblyAngularVelocity = Vector3.zero
+end))
 
 local vortexRestoreAll, vortexRemote
 do
@@ -3605,6 +3689,7 @@ local function cleanup()
 	Settings.Enabled = false
 	Settings.Holding = false
 	Settings.Triggerbot = false
+	Settings.Ragebot = false
 	Settings.ESP = false
 	Settings.Chams = false
 	Settings.ShowNames = false
