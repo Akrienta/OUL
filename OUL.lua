@@ -243,12 +243,15 @@ local Settings = {
 	SpeedValue = 40,
 	InfiniteJump = false,
 	Notifications = true,
-	TargetNPCs = true, -- Target Zombies (aimbot + triggerbot)
-	ESPNPCs = true, -- Zombie/NPC ESP
+	TargetNPCs = true, 
+	ESPNPCs = true, 
 	MouseTP = true,
 	KeybindList = true,
-	Ragebot = false, -- stay behind the closest player
-	RageDistance = 4, -- studs behind the target
+	Ragebot = false, 
+	RageDistance = 4, 
+	RageBehind = true,
+	RageAbove = false,
+	RageBelow = false,
 }
 
 local setESPEnabled
@@ -392,6 +395,7 @@ local SAVE_BOOLS = {
 	"Enabled", "IgnoreFOV", "TeamCheck", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
 	"Boxes", "BoxFill", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed",
 	"InfiniteJump", "Notifications", "TargetNPCs", "ESPNPCs", "MouseTP", "KeybindList", "Ragebot",
+	"RageBehind", "RageAbove", "RageBelow",
 }
 local SAVE_NUMBERS = {
 	FOV = { 20, 500 }, Smoothness = { 1, 100 }, TriggerDelay = { 0, 300 },
@@ -2298,17 +2302,34 @@ addPlaceholderPage("combat_antikatana", "Antikatana")
 do
 	local ragePage = newPage("combat_ragebot", true)
 	local g = newGroup(ragePage, 1, "Ragebot")
-	addCheckbox(g, "Stay Behind Closest", "Ragebot")
+	addCheckbox(g, "Rage", "Ragebot")
+
+	-- only one position mode at a time
+	local rageModes = { "RageBehind", "RageAbove", "RageBelow" }
+	local function modeChanged(key)
+		return function(on)
+			if not on then return end
+			for _, k in ipairs(rageModes) do
+				if k ~= key then
+					Settings[k] = false
+					if refreshers[k] then refreshers[k](true) end
+				end
+			end
+		end
+	end
+	addCheckbox(g, "Behind", "RageBehind", modeChanged("RageBehind"))
+	addCheckbox(g, "Above", "RageAbove", modeChanged("RageAbove"))
+	addCheckbox(g, "Below", "RageBelow", modeChanged("RageBelow"))
 	addSlider(g, "Distance", 2, 20, "RageDistance")
 
 	local info = newGroup(ragePage, 2, "Info")
 	rageStatus = addNote(info, "Target: none")
 	addHint(addNote(info, ""), function()
-		return keyName(getBind("Ragebot").input) .. "  -  ragebot on / off"
+		return keyName(getBind("Ragebot").input) .. "  -  rage on / off"
 	end)
-	addNote(info, "keeps you behind the")
-	addNote(info, "closest player, facing")
-	addNote(info, "the same way they do")
+	addNote(info, "sticks you to the closest")
+	addNote(info, "player: behind, above or")
+	addNote(info, "below them")
 	addNote(info, "uses Team Check")
 end
 
@@ -3197,9 +3218,10 @@ local function mouseTeleport()
 	root.AssemblyLinearVelocity = Vector3.zero
 end
 
--- ===== RAGEBOT: stay behind the closest player =====
+-- ===== RAGEBOT: stay behind / above / below the closest player =====
 -- every frame: find the closest living (damageable) player, then place your character
--- RageDistance studs directly behind them, facing the same way they face.
+-- RageDistance studs behind, above or below them (whichever mode is selected),
+-- facing the same way they face. Behind is the fallback if no mode is selected.
 -- runs after the Fly loop so it takes priority over fly movement.
 local rageTarget = nil
 local rageShown = nil
@@ -3256,8 +3278,19 @@ track(RunService.Stepped:Connect(function()
 	if flat.Magnitude < 0.01 then return end
 	flat = flat.Unit
 
-	-- stand directly behind them, facing the same way they face
-	local pos = rageTarget.root.Position - flat * Settings.RageDistance
+	local targetPos = rageTarget.root.Position
+	local dist = Settings.RageDistance
+	local pos
+	if Settings.RageAbove then
+		pos = targetPos + Vector3.new(0, dist, 0)
+	elseif Settings.RageBelow then
+		pos = targetPos - Vector3.new(0, dist, 0)
+	else
+		-- Behind (also the fallback if no mode is selected)
+		pos = targetPos - flat * dist
+	end
+
+	-- face the same way the target faces
 	myRoot.CFrame = CFrame.lookAt(pos, pos + flat)
 	myRoot.AssemblyLinearVelocity = Vector3.zero
 	myRoot.AssemblyAngularVelocity = Vector3.zero
