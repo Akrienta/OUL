@@ -228,6 +228,8 @@ local Settings = {
 	Boxes = false,
 	BoxFill = false,
 	Skeleton = false,
+	Skybox = false,
+	SkyRainbow = false,
 	WallCheck = true,
 	Watermark = true,
 	ShowFOV = true,
@@ -264,7 +266,7 @@ local LockedSettings = { FlyVortex = true }
 local DisplayNames = {
 	Enabled = "Aimbot", ShowFOV = "FOV Circle", IgnoreFOV = "Ignore FOV", TeamCheck = "Team Check", Triggerbot = "Triggerbot",
 	ESP = "ESP", Chams = "Chams", ShowNames = "Usernames", Tracers = "Tracers",
-	Boxes = "Boxes", BoxFill = "Box Fill", Skeleton = "Skeleton", Fly = "Fly", FlyVortex = "Vortex",
+	Boxes = "Boxes", BoxFill = "Box Fill", Skeleton = "Skeleton", Skybox = "Skybox", SkyRainbow = "Rainbow Sky", Fly = "Fly", FlyVortex = "Vortex",
 	Noclip = "Noclip", Speed = "Speed", InfiniteJump = "Infinite Jump",
 	Watermark = "Watermark", BlurEnabled = "Background Blur", Notifications = "Notifications",
 	TargetNPCs = "Target Zombies/NPCS", ESPNPCs = "Zombie/NPC ESP",
@@ -277,10 +279,11 @@ local function defBind(id, label, kind, key, input)
 	Binds[#Binds + 1] = { id = id, label = label, kind = kind, key = key, input = input, default = input }
 end
 defBind("menu", "Menu", "menu", nil, Enum.KeyCode.End)
+defBind("panic", "Panic (unload)", "panic", nil, Enum.KeyCode.Home)
 defBind("aim", "Aim (hold)", "hold", nil, Enum.UserInputType.MouseButton2)
 for _, k in ipairs({
 	"Enabled", "ShowFOV", "IgnoreFOV", "TeamCheck", "Triggerbot", "Ragebot", "ESP", "Chams", "ShowNames", "Tracers", "Boxes",
-	"BoxFill", "Skeleton", "Fly", "Noclip", "Speed", "InfiniteJump", "Watermark", "BlurEnabled", "Notifications", "KeybindList",
+	"BoxFill", "Skeleton", "Skybox", "Fly", "Noclip", "Speed", "InfiniteJump", "Watermark", "BlurEnabled", "Notifications", "KeybindList",
 }) do
 	local default
 	if k == "Triggerbot" then default = Enum.KeyCode.P end
@@ -364,6 +367,7 @@ local ESPColors = {
 	Box = Color3.fromRGB(255, 255, 255),
 	BoxFill = Color3.fromRGB(255, 70, 70),
 	Skeleton = Color3.fromRGB(255, 255, 255),
+	Sky = Color3.fromRGB(90, 140, 255),
 }
 
 local FOVColor = Color3.fromRGB(255, 255, 255)
@@ -396,6 +400,7 @@ local ConfigAPI = {
 		["Box"] = function() return ESPColors.Box end,
 		["Box Fill"] = function() return ESPColors.BoxFill end,
 		["Skeleton"] = function() return ESPColors.Skeleton end,
+		["Sky Colour"] = function() return ESPColors.Sky end,
 		["Tracers"] = function() return ESPColors.Tracer end,
 		["Usernames"] = function() return ESPColors.Name end,
 		["Checkbox"] = function() return Theme.Switch end,
@@ -416,7 +421,7 @@ local SAVE_VERSION = 2
 
 local SAVE_BOOLS = {
 	"Enabled", "IgnoreFOV", "TeamCheck", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
-	"Boxes", "BoxFill", "Skeleton", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed",
+	"Boxes", "BoxFill", "Skeleton", "Skybox", "SkyRainbow", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed",
 	"InfiniteJump", "Notifications", "TargetNPCs", "ESPNPCs", "MouseTP", "KeybindList", "Ragebot",
 	"RageBehind", "RageAbove", "RageBelow",
 }
@@ -427,7 +432,7 @@ local SAVE_NUMBERS = {
 	RageDistance = { 2, 20 },
 }
 local SAVE_THEME = { "Text", "Switch", "Accent", "Background", "Outline" }
-local SAVE_ESP = { "Fill", "Outline", "Tracer", "Name", "Box", "BoxFill", "Skeleton" }
+local SAVE_ESP = { "Fill", "Outline", "Tracer", "Name", "Box", "BoxFill", "Skeleton", "Sky" }
 
 local function colorToArr(c)
 	return { math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5) }
@@ -518,7 +523,7 @@ local function applySaved(d)
 	for _, bind in ipairs(Binds) do
 		local v = b[bind.id]
 		if v == "" then
-			if bind.kind ~= "menu" then bind.input = nil end
+			if bind.kind ~= "menu" and bind.kind ~= "panic" then bind.input = nil end
 		elseif v ~= nil then
 			local inp = stringToInput(v)
 			if inp then bind.input = inp end
@@ -1150,7 +1155,7 @@ local SUBTABS = {
 		{ id = "antikatana", label = "Antikatana" },
 		{ id = "ragebot", label = "Ragebot" },
 	},
-	visuals = { { id = "esp", label = "ESP" }, { id = "colours", label = "Colours" } },
+	visuals = { { id = "esp", label = "ESP" }, { id = "colours", label = "Colours" }, { id = "sky", label = "Sky" } },
 	settings = { { id = "general", label = "General" }, { id = "keybinds", label = "Keybinds" }, { id = "configs", label = "Configs" } },
 	movement = { { id = "fly", label = "Fly" }, { id = "vortex", label = "Vortex", disabled = true }, { id = "noclip", label = "Noclip" }, { id = "speed", label = "Speed" }, { id = "jump", label = "Jump" }, { id = "mousetp", label = "Mouse TP" } },
 }
@@ -1348,7 +1353,7 @@ end
 
 do
 	-- menu-only options aren't cheats, so they stay off the list
-	local SKIP = { menu = true, Watermark = true, BlurEnabled = true, Notifications = true, KeybindList = true }
+	local SKIP = { menu = true, panic = true, Watermark = true, BlurEnabled = true, Notifications = true, KeybindList = true }
 	local rows = {}
 	local lastSig
 	local timer = 0
@@ -2501,6 +2506,23 @@ do
 end
 
 do
+	local skyPage = newPage("visuals_sky", true)
+	local g = newGroup(skyPage, 1, "Skybox")
+	addCheckbox(g, "Enabled", "Skybox")
+	addCheckbox(g, "Rainbow", "SkyRainbow")
+	addColor(g, "Sky Colour", paletteWith(ESPColors.Sky), function(color)
+		ESPColors.Sky = color
+	end, ESPColors.Sky)
+
+	local info = newGroup(skyPage, 2, "Info")
+	addNote(info, "recolours the whole sky")
+	addNote(info, "hides the game's own sky")
+	addNote(info, "and haze (put back when off)")
+	addNote(info, "rainbow cycles colours")
+	addNote(info, "needs writefile support")
+end
+
+do
 	local flyPage = newPage("movement_fly", true)
 	local g = newGroup(flyPage, 1, "Fly")
 	addCheckbox(g, "Enabled", "Fly")
@@ -2724,16 +2746,17 @@ do
 	end
 
 	local v = newGroup(keyPage, 2, "Visuals")
-	for _, id in ipairs({ "ESP", "Chams", "ShowNames", "Tracers", "Boxes", "BoxFill", "Skeleton" }) do
+	for _, id in ipairs({ "ESP", "Chams", "ShowNames", "Tracers", "Boxes", "BoxFill", "Skeleton", "Skybox" }) do
 		addKeybindRow(v, id)
 	end
 
 	local m = newGroup(keyPage, 2, "Menu")
-	for _, id in ipairs({ "menu", "Watermark", "KeybindList", "BlurEnabled", "Notifications" }) do
+	for _, id in ipairs({ "menu", "panic", "Watermark", "KeybindList", "BlurEnabled", "Notifications" }) do
 		addKeybindRow(m, id)
 	end
 	addNote(m, "click a key, then press a new one")
 	addNote(m, "Esc  -  cancel    Backspace  -  clear")
+	addNote(m, "Panic  -  unloads everything")
 	addButton(m, "Reset all keybinds", Color3.fromRGB(70, 90, 140), Color3.fromRGB(90, 112, 170), function()
 		for _, b in ipairs(Binds) do
 			b.input = b.default
@@ -3389,11 +3412,31 @@ track(RunService.RenderStepped:Connect(function()
 			local shown = false
 
 			if hum and root and hum.Health > 0 then
-				local top = cam:WorldToViewportPoint(root.Position + Vector3.new(0, 2.8, 0))
-				local bottom = cam:WorldToViewportPoint(root.Position - Vector3.new(0, 3.2, 0))
-				if top.Z > 0 and bottom.Z > 0 then
-					local h = math.abs(bottom.Y - top.Y)
-					local w = h * 0.55
+				-- project the 8 corners of a character-sized box (it turns with the player's
+				-- facing) and wrap them, so the outline keeps its size from any angle,
+				-- including looking straight down on someone
+				local look = root.CFrame.LookVector
+				local yaw = (look.X * look.X + look.Z * look.Z > 0.0001) and math.atan2(-look.X, -look.Z) or 0
+				local base = CFrame.new(root.Position) * CFrame.Angles(0, yaw, 0)
+				local minX, minY, maxX, maxY = math.huge, math.huge, -math.huge, -math.huge
+				local inFront = true
+				for i = 0, 7 do
+					local sx = (i % 2 == 0) and -2 or 2
+					local sy = (math.floor(i / 2) % 2 == 0) and -3.2 or 2.8
+					local sz = (i < 4) and -1 or 1
+					local sp = cam:WorldToViewportPoint(base:PointToWorldSpace(Vector3.new(sx, sy, sz)))
+					if sp.Z <= 0 then
+						inFront = false
+						break
+					end
+					minX = math.min(minX, sp.X)
+					maxX = math.max(maxX, sp.X)
+					minY = math.min(minY, sp.Y)
+					maxY = math.max(maxY, sp.Y)
+				end
+				if inFront then
+					local w = maxX - minX
+					local h = maxY - minY
 					if h > 2 then
 						shown = true
 						if not box then
@@ -3407,7 +3450,7 @@ track(RunService.RenderStepped:Connect(function()
 							stroke.Parent = box
 							boxFrames[plr] = box
 						end
-						box.Position = UDim2.fromOffset((top.X + bottom.X) / 2 - w / 2, math.min(top.Y, bottom.Y))
+						box.Position = UDim2.fromOffset(minX, minY)
 						box.Size = UDim2.fromOffset(w, h)
 						box.BackgroundColor3 = ESPColors.BoxFill
 						box.BackgroundTransparency = Settings.BoxFill and 0.7 or 1
@@ -3538,6 +3581,168 @@ do
 			end
 		end
 	end))
+end
+
+-- ===== SKYBOX: recolour the sky =====
+-- replaces the game's Sky with one whose six faces are a 1x1 picture of your colour
+-- (the picture is generated here and saved as a tiny PNG in your executor workspace,
+-- so it needs writefile + getcustomasset). The game's own Sky and Atmosphere are
+-- hidden while it's on and put back when you turn it off or unload.
+do
+	local stash = {}
+	local mySky
+	local active = false
+	local scanTimer, lastKey = 0, nil
+	local assets, files = {}, {}
+	local canFiles = type(writefile) == "function" and type(getcustomasset) == "function"
+
+	-- ---- minimal PNG writer (solid colour, 1x1) ----
+	local function be32(n)
+		return string.char(
+			math.floor(n / 16777216) % 256,
+			math.floor(n / 65536) % 256,
+			math.floor(n / 256) % 256,
+			n % 256
+		)
+	end
+
+	local crcTable
+	local function crc32(str)
+		if not crcTable then
+			crcTable = {}
+			for i = 0, 255 do
+				local c = i
+				for _ = 1, 8 do
+					if bit32.band(c, 1) == 1 then
+						c = bit32.bxor(0xEDB88320, bit32.rshift(c, 1))
+					else
+						c = bit32.rshift(c, 1)
+					end
+				end
+				crcTable[i] = c
+			end
+		end
+		local c = 0xFFFFFFFF
+		for i = 1, #str do
+			c = bit32.bxor(crcTable[bit32.band(bit32.bxor(c, str:byte(i)), 0xFF)], bit32.rshift(c, 8))
+		end
+		return bit32.bxor(c, 0xFFFFFFFF)
+	end
+
+	local function pngChunk(kind, data)
+		return be32(#data) .. kind .. data .. be32(crc32(kind .. data))
+	end
+
+	local function solidPNG(r, g, b)
+		local raw = string.char(0, r, g, b) -- filter byte + one RGB pixel
+		local a, bb = 1, 0
+		for i = 1, #raw do
+			a = (a + raw:byte(i)) % 65521
+			bb = (bb + a) % 65521
+		end
+		local zlib = "\120\1" .. "\1" .. "\4\0" .. "\251\255" .. raw .. be32(bb * 65536 + a)
+		local ihdr = be32(1) .. be32(1) .. "\8\2\0\0\0"
+		return "\137PNG\13\10\26\10" .. pngChunk("IHDR", ihdr) .. pngChunk("IDAT", zlib) .. pngChunk("IEND", "")
+	end
+
+	local function q(v)
+		return math.clamp(math.floor(v * 255 / 8 + 0.5) * 8, 0, 255)
+	end
+
+	-- returns the sky picture for a colour (made once, then reused)
+	local function skyAsset(c)
+		local r, g, b = q(c.R), q(c.G), q(c.B)
+		local key = string.format("%02X%02X%02X", r, g, b)
+		if assets[key] then return assets[key], key end
+		local ok, res = pcall(function()
+			local name = "OULSky_" .. key .. ".png"
+			writefile(name, solidPNG(r, g, b))
+			files[#files + 1] = name
+			return getcustomasset(name)
+		end)
+		if ok and res then
+			assets[key] = res
+			return res, key
+		end
+		return nil, key
+	end
+
+	local function stashOthers()
+		for _, c in ipairs(Lighting:GetChildren()) do
+			if (c:IsA("Sky") or c:IsA("Atmosphere")) and c ~= mySky then
+				stash[#stash + 1] = c
+				c.Parent = nil
+			end
+		end
+	end
+
+	local function enable()
+		if not canFiles then return false end
+		active = true
+		lastKey = nil
+
+		mySky = Instance.new("Sky")
+		mySky.Name = "OULSky"
+		mySky.StarCount = 0
+		mySky.CelestialBodiesShown = false
+
+		stashOthers()
+		mySky.Parent = Lighting
+		return true
+	end
+
+	local function disable(purge)
+		if active then
+			active = false
+			if mySky then pcall(function() mySky:Destroy() end) mySky = nil end
+			for _, c in ipairs(stash) do
+				pcall(function() c.Parent = Lighting end)
+			end
+			stash = {}
+		end
+		if purge then
+			if type(delfile) == "function" then
+				for _, f in ipairs(files) do pcall(delfile, f) end
+			end
+			files, assets = {}, {}
+		end
+	end
+
+	track(RunService.Heartbeat:Connect(function(dt)
+		if Settings.Skybox then
+			if not active and not enable() then
+				Settings.Skybox = false
+				if refreshers.Skybox then refreshers.Skybox(true) end
+				toast("Skybox needs file support")
+				return
+			end
+
+			-- once a second: re-hide any sky the game adds, and re-add ours if it gets removed
+			scanTimer += dt
+			if scanTimer >= 1 then
+				scanTimer = 0
+				stashOthers()
+				if mySky.Parent ~= Lighting then mySky.Parent = Lighting end
+			end
+
+			local c
+			if Settings.SkyRainbow then
+				c = Color3.fromHSV((math.floor(os.clock() * 6) % 60) / 60, 0.75, 1)
+			else
+				c = ESPColors.Sky
+			end
+			local asset, key = skyAsset(c)
+			if asset and key ~= lastKey then
+				lastKey = key
+				mySky.SkyboxBk, mySky.SkyboxDn, mySky.SkyboxFt = asset, asset, asset
+				mySky.SkyboxLf, mySky.SkyboxRt, mySky.SkyboxUp = asset, asset, asset
+			end
+		elseif active then
+			disable()
+		end
+	end))
+
+	ConfigAPI.skyRestore = disable
 end
 
 local flyActive = false
@@ -4054,6 +4259,22 @@ end))
 track(Players.PlayerRemoving:Connect(vortexRestore))
 end
 
+-- ===== PANIC =====
+-- hides every bit of UI instantly, then runs the normal unload (turns off all
+-- features, restores speed / noclip / fly / mouse, removes ESP, stops saving).
+-- it does NOT write the "everything off" state to your save file.
+local function panicNow()
+	pcall(function() gui.Enabled = false end)
+	pcall(function() blur.Size = 0 end)
+	local fn = shared.OULCleanup
+	shared.OULCleanup = nil
+	if fn then pcall(fn) end
+	-- fallbacks in case any part of the unload failed
+	pcall(function() gui:Destroy() end)
+	pcall(function() blur:Destroy() end)
+	pcall(function() espFolder:Destroy() end)
+end
+
 track(UserInputService.InputBegan:Connect(function(input, processed)
 	if rebinding then
 		local b = rebinding
@@ -4064,8 +4285,8 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 				refreshBindUI()
 				return
 			elseif input.KeyCode == Enum.KeyCode.Backspace or input.KeyCode == Enum.KeyCode.Delete then
-				if b.kind == "menu" then
-					toast("The menu key can't be cleared")
+				if b.kind == "menu" or b.kind == "panic" then
+					toast("This key can't be cleared")
 					return
 				end
 				newInput = false
@@ -4083,6 +4304,12 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 
 		if newInput then
 			for _, o in ipairs(Binds) do
+				if o ~= b and o.kind == "panic" and o.input == newInput then
+					toast("That key is the panic key")
+					return
+				end
+			end
+			for _, o in ipairs(Binds) do
 				if o ~= b and o.input == newInput then
 					o.input = nil
 				end
@@ -4094,6 +4321,13 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 		refreshBindUI()
 		updateKeyHints()
 		toast(b.label .. "  ->  " .. keyName(b.input))
+		return
+	end
+
+	-- PANIC works even while typing in a text box or with the menu open
+	local panicBind = getBind("panic")
+	if panicBind and panicBind.input and inputMatches(input, panicBind.input) then
+		panicNow()
 		return
 	end
 
@@ -4193,6 +4427,9 @@ local function cleanup()
 	end)
 
 	pcall(noclipRestore)
+	pcall(function()
+		if ConfigAPI.skyRestore then ConfigAPI.skyRestore(true) end
+	end)
 
 	pcall(vortexRestoreAll)
 	pcall(function()
