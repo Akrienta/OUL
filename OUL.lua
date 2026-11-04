@@ -228,6 +228,7 @@ local Settings = {
 	Boxes = false,
 	BoxFill = false,
 	Skeleton = false,
+	ESPHealth = false,
 	Skybox = false,
 	SkyRainbow = false,
 	WallCheck = true,
@@ -255,6 +256,8 @@ local Settings = {
 	RageBehind = true,
 	RageAbove = false,
 	RageBelow = false,
+	RageOrbit = false,
+	OrbitSpeed = 6,
 }
 
 local setESPEnabled
@@ -266,12 +269,12 @@ local LockedSettings = { FlyVortex = true }
 local DisplayNames = {
 	Enabled = "Aimbot", ShowFOV = "FOV Circle", IgnoreFOV = "Ignore FOV", TeamCheck = "Team Check", Triggerbot = "Triggerbot",
 	ESP = "ESP", Chams = "Chams", ShowNames = "Usernames", Tracers = "Tracers",
-	Boxes = "Boxes", BoxFill = "Box Fill", Skeleton = "Skeleton", Skybox = "Skybox", SkyRainbow = "Rainbow Sky", Fly = "Fly", FlyVortex = "Vortex",
+	Boxes = "Boxes", BoxFill = "Box Fill", Skeleton = "Skeleton", ESPHealth = "Health", Skybox = "Skybox", SkyRainbow = "Rainbow Sky", Fly = "Fly", FlyVortex = "Vortex",
 	Noclip = "Noclip", Speed = "Speed", InfiniteJump = "Infinite Jump",
 	Watermark = "Watermark", BlurEnabled = "Background Blur", Notifications = "Notifications",
 	TargetNPCs = "Target Zombies/NPCS", ESPNPCs = "Zombie/NPC ESP",
 	MouseTP = "Mouse TP", KeybindList = "Keybind List",
-	Ragebot = "Ragebot",
+	Ragebot = "Ragebot", RageOrbit = "Orbit",
 }
 
 local Binds = {}
@@ -421,15 +424,15 @@ local SAVE_VERSION = 2
 
 local SAVE_BOOLS = {
 	"Enabled", "IgnoreFOV", "TeamCheck", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
-	"Boxes", "BoxFill", "Skeleton", "Skybox", "SkyRainbow", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed",
+	"Boxes", "BoxFill", "Skeleton", "ESPHealth", "Skybox", "SkyRainbow", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed",
 	"InfiniteJump", "Notifications", "TargetNPCs", "ESPNPCs", "MouseTP", "KeybindList", "Ragebot",
-	"RageBehind", "RageAbove", "RageBelow",
+	"RageBehind", "RageAbove", "RageBelow", "RageOrbit",
 }
 local SAVE_NUMBERS = {
 	FOV = { 20, 500 }, Smoothness = { 1, 100 }, TriggerDelay = { 0, 300 },
 	BlurAmount = { 1, 56 }, UITransparency = { 0, 70 }, FlySpeed = { 5, 1000 },
 	VortexSpeed = { 1, 20 }, VortexRadius = { 2, 14 }, SpeedValue = { 16, 250 },
-	RageDistance = { 2, 20 },
+	RageDistance = { 2, 20 }, OrbitSpeed = { 1, 30 },
 }
 local SAVE_THEME = { "Text", "Switch", "Accent", "Background", "Outline" }
 local SAVE_ESP = { "Fill", "Outline", "Tracer", "Name", "Box", "BoxFill", "Skeleton", "Sky" }
@@ -2448,6 +2451,8 @@ do
 	addCheckbox(g, "Above", "RageAbove", modeChanged("RageAbove"))
 	addCheckbox(g, "Below", "RageBelow", modeChanged("RageBelow"))
 	addSlider(g, "Distance", 2, 20, "RageDistance")
+	addCheckbox(g, "Orbit", "RageOrbit")
+	addSlider(g, "Orbit Speed", 1, 30, "OrbitSpeed")
 
 	local info = newGroup(ragePage, 2, "Info")
 	rageStatus = addNote(info, "Target: none")
@@ -2457,6 +2462,8 @@ do
 	addNote(info, "sticks you to the closest")
 	addNote(info, "player until they die:")
 	addNote(info, "behind, above or below")
+	addNote(info, "orbit: spin around them")
+	addNote(info, "(distance = orbit radius)")
 	addNote(info, "uses Team Check")
 end
 
@@ -2476,6 +2483,7 @@ do
 	addCheckbox(g, "Boxes", "Boxes")
 	addCheckbox(g, "Box Fill", "BoxFill")
 	addCheckbox(g, "Skeleton", "Skeleton")
+	addCheckbox(g, "Health", "ESPHealth")
 	addCheckbox(g, "Zombie/NPC ESP", "ESPNPCs")
 
 	local info = newGroup(espPage, 2, "Info")
@@ -2484,6 +2492,7 @@ do
 	addNote(info, "boxes: outline + optional")
 	addNote(info, "see-through fill")
 	addNote(info, "skeleton: bone lines")
+	addNote(info, "health: HP under feet")
 	addNote(info, "colours are in Colours")
 end
 
@@ -3583,6 +3592,77 @@ do
 	end))
 end
 
+-- ===== HEALTH ESP: shows current HP under each player / NPC =====
+do
+	local hpTags = {}
+
+	local function removeHealth(key)
+		local t = hpTags[key]
+		if t then
+			t.gui:Destroy()
+			hpTags[key] = nil
+		end
+	end
+	track(Players.PlayerRemoving:Connect(removeHealth))
+
+	track(RunService.RenderStepped:Connect(function()
+		if not (Settings.ESP and Settings.ESPHealth) then
+			for key in pairs(hpTags) do removeHealth(key) end
+			return
+		end
+
+		local ents = espEntities()
+		local live = {}
+		for _, e in ipairs(ents) do
+			if e[2] then live[e[1]] = true end
+		end
+		for key in pairs(hpTags) do
+			if not live[key] then removeHealth(key) end
+		end
+
+		for _, ent in ipairs(ents) do
+			local key, char = ent[1], ent[2]
+			if char then
+				local hum = char:FindFirstChildOfClass("Humanoid")
+				local root = char:FindFirstChild("HumanoidRootPart")
+				local t = hpTags[key]
+				if t and t.gui.Adornee ~= root then
+					removeHealth(key)
+					t = nil
+				end
+
+				if hum and root then
+					if not t then
+						local g = Instance.new("BillboardGui")
+						g.Name = "ESPHealth"
+						g.Adornee = root
+						g.AlwaysOnTop = true
+						g.Size = UDim2.fromOffset(100, 16)
+						g.StudsOffset = Vector3.new(0, -3.6, 0)
+
+						local l = Instance.new("TextLabel")
+						l.Size = UDim2.new(1, 0, 1, 0)
+						l.BackgroundTransparency = 1
+						l.Font = Enum.Font.GothamBold
+						l.TextSize = 13
+						l.TextStrokeTransparency = 0.4
+						l.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+						l.Parent = g
+
+						g.Parent = espFolder
+						t = { gui = g, label = l }
+						hpTags[key] = t
+					end
+
+					local pct = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
+					t.label.Text = math.floor(hum.Health + 0.5) .. " HP"
+					t.label.TextColor3 = Color3.fromRGB(235, 70, 70):Lerp(Color3.fromRGB(90, 220, 120), pct)
+				end
+			end
+		end
+	end))
+end
+
 -- ===== SKYBOX: recolour the sky =====
 -- replaces the game's Sky with one whose six faces are a 1x1 picture of your colour
 -- (the picture is generated here and saved as a tiny PNG in your executor workspace,
@@ -3870,14 +3950,17 @@ local function mouseTeleport()
 	root.AssemblyLinearVelocity = Vector3.zero
 end
 
--- ===== RAGEBOT: stay behind / above / below the closest player =====
+-- ===== RAGEBOT: stay behind / above / below (or orbit) the closest player =====
 -- finds the closest living (damageable) player, then LOCKS ON: it keeps that same
 -- player until they die, leave, or respawn, and only then picks a new closest one.
 -- places your character RageDistance studs behind, above or below them (whichever
 -- mode is selected), facing the same way they face. Behind is the fallback if no
--- mode is selected. runs after the Fly loop so it takes priority over fly movement.
+-- mode is selected. With Orbit on, you circle them at RageDistance studs instead,
+-- always facing them, at OrbitSpeed radians per second. runs after the Fly loop so
+-- it takes priority over fly movement.
 local rageTarget = nil
 local rageShown = nil
+local rageAngle = 0
 
 local function getRageTarget(myRoot)
 	-- keep the current target until they die, leave, or respawn
@@ -3913,7 +3996,7 @@ local function setRageStatus(text)
 	end
 end
 
-track(RunService.Stepped:Connect(function()
+track(RunService.Stepped:Connect(function(_, dt)
 	if not Settings.Ragebot then
 		rageTarget = nil
 		setRageStatus("Target: none")
@@ -3932,13 +4015,30 @@ track(RunService.Stepped:Connect(function()
 	end
 	setRageStatus("Target: " .. rageTarget.name)
 
+	local targetPos = rageTarget.root.Position
+	local dist = Settings.RageDistance
+
+	-- ORBIT: circle around the target, always facing them
+	if Settings.RageOrbit then
+		rageAngle = (rageAngle + dt * Settings.OrbitSpeed) % (math.pi * 2)
+		local height = 0
+		if Settings.RageAbove then
+			height = dist
+		elseif Settings.RageBelow then
+			height = -dist
+		end
+		local pos = targetPos + Vector3.new(math.cos(rageAngle) * dist, height, math.sin(rageAngle) * dist)
+		myRoot.CFrame = CFrame.lookAt(pos, targetPos)
+		myRoot.AssemblyLinearVelocity = Vector3.zero
+		myRoot.AssemblyAngularVelocity = Vector3.zero
+		return
+	end
+
 	local look = rageTarget.root.CFrame.LookVector
 	local flat = Vector3.new(look.X, 0, look.Z)
 	if flat.Magnitude < 0.01 then return end
 	flat = flat.Unit
 
-	local targetPos = rageTarget.root.Position
-	local dist = Settings.RageDistance
 	local pos
 	if Settings.RageAbove then
 		pos = targetPos + Vector3.new(0, dist, 0)
@@ -4411,10 +4511,12 @@ local function cleanup()
 	Settings.Holding = false
 	Settings.Triggerbot = false
 	Settings.Ragebot = false
+	Settings.RageOrbit = false
 	Settings.ESP = false
 	Settings.Chams = false
 	Settings.ShowNames = false
 	Settings.Tracers = false
+	Settings.ESPHealth = false
 	Settings.Fly = false
 	Settings.FlyVortex = false
 	Settings.Noclip = false
