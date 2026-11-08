@@ -409,6 +409,7 @@ local Settings = {
 	Watermark = true,
 	ShowFOV = true,
 	AimPart = "Head",
+	AimMode = "Hold",
 	UITransparency = 0,
 	Fly = false,
 	FlySpeed = 60,
@@ -458,7 +459,7 @@ local function defBind(id, label, kind, key, input)
 end
 defBind("menu", "Menu", "menu", nil, Enum.KeyCode.End)
 defBind("panic", "Panic (unload)", "panic", nil, Enum.KeyCode.Home)
-defBind("aim", "Aim (hold)", "hold", nil, Enum.UserInputType.MouseButton2)
+defBind("aim", "Aim key", "hold", nil, Enum.UserInputType.MouseButton2)
 for _, k in ipairs({
 	"Enabled", "ShowFOV", "IgnoreFOV", "TeamCheck", "Triggerbot", "Ragebot", "ESP", "Chams", "ShowNames", "Tracers", "Boxes",
 	"BoxFill", "Skeleton", "Skybox", "Fly", "Noclip", "Speed", "InfiniteJump", "Watermark", "BlurEnabled", "Notifications", "KeybindList",
@@ -645,6 +646,7 @@ local function takeSnapshot()
 		snap.settings[k] = Settings[k]
 	end
 	snap.settings.AimPart = Settings.AimPart
+	snap.settings.AimMode = Settings.AimMode
 	snap.settings.RageMode = Settings.RageMode
 	snap.settings.RageTarget = Settings.RageTarget
 	for _, k in ipairs(SAVE_THEME) do
@@ -673,6 +675,7 @@ local function applySaved(d)
 		end
 	end
 	if s.AimPart == "Head" or s.AimPart == "Body" then Settings.AimPart = s.AimPart end
+	if s.AimMode == "Hold" or s.AimMode == "Toggle" then Settings.AimMode = s.AimMode end
 	if s.RageMode == "Closest" or s.RageMode == "Selected" then Settings.RageMode = s.RageMode end
 	if type(s.RageTarget) == "string" then Settings.RageTarget = s.RageTarget:sub(1, 24) end
 
@@ -1541,7 +1544,7 @@ do
 				if b.kind == "toggle" then
 					on, tag = Settings[b.key] and true or false, "Toggle"
 				elseif b.kind == "hold" then
-					on, tag = Settings.Holding and true or false, "Hold"
+					on, tag = Settings.Holding and true or false, (Settings.AimMode == "Toggle") and "Toggle" or "Hold"
 				else
 					on, tag = false, "Press"
 				end
@@ -1751,6 +1754,14 @@ local function nextOrder(parent)
 end
 
 local pages = {}
+local searchIndex = {}
+local groupPage = setmetatable({}, { __mode = "k" })
+local function reg(parent, text)
+	local pg = groupPage[parent]
+	if pg and text and text ~= "" then
+		searchIndex[#searchIndex + 1] = { text = text, page = pg.name }
+	end
+end
 local currentTab
 local currentPage
 local currentSub = { combat = "aimbot", visuals = "esp", movement = "fly", settings = "general" }
@@ -1785,7 +1796,7 @@ local function newPage(name, hasSubs)
 		cols[i] = { frame = col, layout = layout }
 	end
 
-	local page = { frame = frame, cols = cols, subOffset = hasSubs and SUB_H or 0 }
+	local page = { name = name, frame = frame, cols = cols, subOffset = hasSubs and SUB_H or 0 }
 	pages[name] = page
 	return page
 end
@@ -1839,6 +1850,7 @@ local function newGroup(page, colIndex, titleText)
 	pad.PaddingRight = UDim.new(0, 8)
 	pad.Parent = content
 
+	groupPage[content] = page
 	return content
 end
 
@@ -1850,6 +1862,7 @@ local function addNote(parent, text)
 end
 
 local function addCheckbox(parent, text, key, onChanged)
+	reg(parent, text)
 	local row = Instance.new("TextButton")
 	row.Size = UDim2.new(1, 0, 0, 20)
 	row.BackgroundTransparency = 1
@@ -1913,6 +1926,7 @@ local function addCheckbox(parent, text, key, onChanged)
 end
 
 local function addSlider(parent, text, min, max, key, onChanged)
+	reg(parent, text)
 	local bar = Instance.new("Frame")
 	bar.Size = UDim2.new(1, 0, 0, 20)
 	bar.BorderSizePixel = 0
@@ -1985,7 +1999,8 @@ local function addSlider(parent, text, min, max, key, onChanged)
 	return bar
 end
 
-local function addSegment(parent, text, key, optA, optB)
+local function addSegment(parent, text, key, optA, optB, onChanged)
+	reg(parent, text)
 	local row = Instance.new("Frame")
 	row.Size = UDim2.new(1, 0, 0, 22)
 	row.BackgroundTransparency = 1
@@ -2046,6 +2061,7 @@ local function addSegment(parent, text, key, optA, optB)
 		btn.MouseButton1Click:Connect(function()
 			Settings[key] = name
 			refresh(true)
+			if onChanged then onChanged(name) end
 		end)
 		buttons[i] = btn
 	end
@@ -2058,6 +2074,7 @@ local function addSegment(parent, text, key, optA, optB)
 end
 
 local function addButton(parent, text, color, hoverColor, onClick)
+	reg(parent, text)
 	local btn = Instance.new("TextButton")
 	btn.Size = UDim2.new(1, 0, 0, 22)
 	btn.BorderSizePixel = 0
@@ -2136,6 +2153,7 @@ local GRID_W = 8 * 18 + 7 * 5
 local PAL_H = 60
 
 local function addColor(parent, text, colors, onPick, default, hueS, hueV)
+	reg(parent, text)
 	hueS = hueS or 0.75
 	hueV = hueV or 1
 
@@ -2549,6 +2567,10 @@ do
 	end)
 	addSlider(g, "Smoothness", 1, 100, "Smoothness")
 	addSegment(g, "Target", "AimPart", "Head", "Body")
+	addSegment(g, "Key mode", "AimMode", "Hold", "Toggle", function()
+		Settings.Holding = false
+		updateKeyHints()
+	end)
 
 	local v = newGroup(aimPage, 2, "FOV Circle")
 	addCheckbox(v, "Show FOV", "ShowFOV")
@@ -2559,7 +2581,11 @@ do
 
 	local info = newGroup(aimPage, 2, "Info")
 	addHint(addNote(info, ""), function()
-		return "hold " .. string.lower(keyName(getBind("aim").input)) .. " to aim"
+		local k = string.lower(keyName(getBind("aim").input))
+		if Settings.AimMode == "Toggle" then
+			return "press " .. k .. " to toggle aim"
+		end
+		return "hold " .. k .. " to aim"
 	end)
 	addNote(info, "range: 1000 studs")
 	addNote(info, "needs mouse lock")
@@ -3005,6 +3031,7 @@ do
 	local keyPage = newPage("settings_keybinds", true)
 	local function addKeybindRow(parent, id)
 		local b = getBind(id)
+		reg(parent, b.label)
 		local row = Instance.new("Frame")
 		row.Size = UDim2.new(1, 0, 0, 22)
 		row.BackgroundTransparency = 1
@@ -3271,6 +3298,181 @@ do
 
 		rebuild()
 	end
+end
+
+do
+	local MAX_ROWS = 4
+	local ROW_H = 32
+
+	local box = Instance.new("TextBox")
+	box.Name = "Search"
+	box.Size = UDim2.fromOffset(170, 22)
+	box.AnchorPoint = Vector2.new(1, 0.5)
+	box.Position = UDim2.new(1, -10, 0.5, 0)
+	box.BorderSizePixel = 0
+	box.ClearTextOnFocus = false
+	box.PlaceholderText = "search settings..."
+	box.Text = ""
+	box.Font = FONT
+	box.TextSize = 12
+	box.TextXAlignment = Enum.TextXAlignment.Left
+	box.ZIndex = 110
+	box.Parent = titleBar
+	bind(box, "BackgroundColor3", function() return Theme.Field end)
+	bind(box, "TextColor3", function() return Theme.Text end)
+	bind(box, "PlaceholderColor3", function() return Theme.Dim end)
+	corner(box, 3)
+	outline(box, 0.4)
+	do
+		local pad = Instance.new("UIPadding")
+		pad.PaddingLeft = UDim.new(0, 6)
+		pad.Parent = box
+	end
+
+	local results = Instance.new("ScrollingFrame")
+	results.Name = "SearchResults"
+	results.Size = UDim2.fromOffset(250, 0)
+	results.AnchorPoint = Vector2.new(1, 0)
+	results.Position = UDim2.new(1, -10, 0, TITLE_H - 2)
+	results.BorderSizePixel = 0
+	results.ScrollBarThickness = 3
+	results.CanvasSize = UDim2.new()
+	results.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	results.Visible = false
+	results.ZIndex = 150
+	results.Parent = panel
+	bind(results, "BackgroundColor3", function() return Theme.Group end)
+	corner(results, 4)
+	outline(results, 0)
+	do
+		local layout = Instance.new("UIListLayout")
+		layout.Padding = UDim.new(0, 2)
+		layout.SortOrder = Enum.SortOrder.LayoutOrder
+		layout.Parent = results
+		local pad = Instance.new("UIPadding")
+		pad.PaddingTop = UDim.new(0, 3)
+		pad.PaddingBottom = UDim.new(0, 3)
+		pad.PaddingLeft = UDim.new(0, 3)
+		pad.PaddingRight = UDim.new(0, 3)
+		pad.Parent = results
+	end
+
+	local firstHit
+
+	local function go(hit)
+		box.Text = ""
+		results.Visible = false
+		box:ReleaseFocus()
+		if currentTab ~= hit.tab or currentSub[hit.tab] ~= hit.sub then
+			selectPage(hit.tab, hit.sub, false)
+		end
+	end
+
+	local function rowLabel(parent, text, size, y, h, color)
+		local l = Instance.new("TextLabel")
+		l.BackgroundTransparency = 1
+		l.Position = UDim2.fromOffset(6, y)
+		l.Size = UDim2.new(1, -12, 0, h)
+		l.Font = FONT
+		l.TextSize = size
+		l.Text = text
+		l.TextColor3 = color
+		l.TextXAlignment = Enum.TextXAlignment.Left
+		l.TextTruncate = Enum.TextTruncate.AtEnd
+		l.ZIndex = 152
+		l.Parent = parent
+	end
+
+	local function rebuild()
+		for _, c in ipairs(results:GetChildren()) do
+			if c:IsA("TextButton") then c:Destroy() end
+		end
+		firstHit = nil
+
+		local q = string.lower(box.Text)
+		q = (string.gsub(q, "^%s+", ""))
+		q = (string.gsub(q, "%s+$", ""))
+		if q == "" then
+			results.Visible = false
+			return
+		end
+
+		local hits = {}
+		for _, e in ipairs(searchIndex) do
+			local tab, sub = string.match(e.page, "^(%w+)_(%w+)$")
+			local subLabel = ""
+			for _, st in ipairs(SUBTABS[tab] or {}) do
+				if st.id == sub then subLabel = st.label end
+			end
+			local path = (TAB_LABELS[tab] or tab) .. " > " .. subLabel
+			local name = string.lower(e.text)
+			local rank
+			if string.find(name, q, 1, true) then
+				rank = (string.sub(name, 1, #q) == q) and 1 or 2
+			elseif string.find(string.lower(path), q, 1, true) then
+				rank = 3
+			end
+			if rank then
+				hits[#hits + 1] = { text = e.text, tab = tab, sub = sub, path = path, rank = rank }
+			end
+		end
+		table.sort(hits, function(a, b)
+			if a.rank ~= b.rank then return a.rank < b.rank end
+			if a.text ~= b.text then return a.text < b.text end
+			return a.path < b.path
+		end)
+
+		results.Visible = true
+		if #hits == 0 then
+			local b = Instance.new("TextButton")
+			b.Size = UDim2.new(1, 0, 0, 22)
+			b.BackgroundTransparency = 1
+			b.Text = ""
+			b.AutoButtonColor = false
+			b.ZIndex = 151
+			b.Parent = results
+			rowLabel(b, "no matching settings", 12, 0, 22, Theme.Dim)
+			results.Size = UDim2.fromOffset(250, 28)
+			return
+		end
+
+		firstHit = hits[1]
+		for i = 1, math.min(#hits, 40) do
+			local hit = hits[i]
+			local b = Instance.new("TextButton")
+			b.Size = UDim2.new(1, 0, 0, ROW_H)
+			b.BorderSizePixel = 0
+			b.BackgroundColor3 = Theme.Accent
+			b.BackgroundTransparency = 1
+			b.Text = ""
+			b.AutoButtonColor = false
+			b.LayoutOrder = i
+			b.ZIndex = 151
+			b.Parent = results
+			corner(b, 3)
+			rowLabel(b, hit.text, 12, 3, 15, Theme.Text)
+			rowLabel(b, hit.path, 10, 18, 12, Theme.Dim)
+			b.MouseEnter:Connect(function() tween(b, { BackgroundTransparency = 0.6 }) end)
+			b.MouseLeave:Connect(function() tween(b, { BackgroundTransparency = 1 }) end)
+			b.MouseButton1Click:Connect(function() go(hit) end)
+		end
+		results.Size = UDim2.fromOffset(250, math.min(#hits, MAX_ROWS) * (ROW_H + 2) + 8)
+	end
+
+	box:GetPropertyChangedSignal("Text"):Connect(rebuild)
+	box.Focused:Connect(rebuild)
+	box.FocusLost:Connect(function(enterPressed)
+		if enterPressed and firstHit then
+			go(firstHit)
+			return
+		end
+		task.delay(0.2, function()
+			if not box:IsFocused() then
+				results.Visible = false
+			end
+		end)
+	end)
+	onTheme(rebuild)
 end
 
 currentTab = "combat"
@@ -4687,7 +4889,12 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 			elseif b.kind == "menu" then
 				setMenuVisible(not menuOpen)
 			elseif b.kind == "hold" then
-				Settings.Holding = true
+				if Settings.AimMode == "Toggle" then
+					Settings.Holding = not Settings.Holding
+					if notify then notify("Aim lock", Settings.Holding) end
+				else
+					Settings.Holding = true
+				end
 			elseif b.kind == "press" then
 				mouseTeleport()
 			end
@@ -4704,7 +4911,7 @@ local aiming = false
 local lockedPart = nil
 
 track(UserInputService.InputEnded:Connect(function(input)
-	if inputMatches(input, getBind("aim").input) then
+	if Settings.AimMode ~= "Toggle" and inputMatches(input, getBind("aim").input) then
 		if aiming then
 			aimEndedAt = os.clock()
 			savedCFrame = workspace.CurrentCamera.CFrame
@@ -4738,7 +4945,12 @@ RunService:BindToRenderStep("Aimbot", Enum.RenderPriority.Camera.Value + 1, func
 	end
 
 	local mouseLocked = UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
+	local wasAiming = aiming
 	aiming = Settings.Enabled and Settings.Holding and mouseLocked and not menuOpen
+	if wasAiming and not aiming and Settings.AimMode == "Toggle" then
+		aimEndedAt = os.clock()
+		savedCFrame = Camera.CFrame
+	end
 	if not aiming then
 		lockedPart = nil
 		return
