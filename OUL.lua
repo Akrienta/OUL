@@ -4,6 +4,200 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local Lighting = game:GetService("Lighting")
 
+-- =====================================================================================
+-- ONE FILE, TWO JOBS
+--   * Run it through your executor  -> the client menu below runs (IsServer() is false).
+--   * Also paste this SAME file into a Script in ServerScriptService -> the block directly
+--     below runs on the server and does the vortex so EVERYONE sees it.
+-- The server block does the vortex itself: it disables the player's Motor6D joints and moves
+-- the loose body parts in an orbit (parts are anchored, so the server fully controls them).
+-- Server changes replicate to every player, even ones not running the menu.
+-- =====================================================================================
+if RunService:IsServer() then
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local remote = ReplicatedStorage:FindFirstChild("OULVortexEvent")
+if not remote then
+	remote = Instance.new("RemoteEvent")
+	remote.Name = "OULVortexEvent"
+	remote.Parent = ReplicatedStorage
+end
+
+-- tells the menu "the server is handling the vortex, don't draw it locally"
+ReplicatedStorage:SetAttribute("OULVortexServerSide", true)
+
+local wants = {}   -- [player] = { want, speed, radius }
+local states = {}  -- [player] = build state
+local lastFire = {}
+
+remote.OnServerEvent:Connect(function(player, want, speed, radius)
+	local now = os.clock()
+	if lastFire[player] and now - lastFire[player] < 0.05 then return end
+	lastFire[player] = now
+
+	if typeof(want) ~= "boolean" then return end
+	speed, radius = tonumber(speed), tonumber(radius)
+	if not speed or not radius or speed ~= speed or radius ~= radius then return end
+
+	wants[player] = {
+		want = want,
+		speed = math.clamp(speed, 1, 100),
+		radius = math.clamp(radius, 2, 60),
+	}
+end)
+
+local function place(st, ease)
+	local root = st.root
+	local t = os.clock()
+	local spin = t * st.speed * 0.5
+	local center = root.Position
+	local count = math.max(st.orbitCount, 1)
+	local rest = { [root] = root.CFrame }
+
+	for _, j in ipairs(st.joints) do
+		local m = j.motor
+		local p0 = m.Part0
+		if m.Parent and p0 and j.part.Parent then
+			local r = (rest[p0] or p0.CFrame) * j.c0 * m.Transform * j.c1:Inverse()
+			rest[j.part] = r
+
+			local cf = r
+			if not j.head then
+				local sl = j.slot
+				-- spread the parts over a sphere (golden-angle spiral), then tumble the whole sphere
+				-- so parts swing above and below you as well as around you
+				local k = (sl - 0.5) / count
+				local phi = math.acos(1 - 2 * k)
+				local theta = sl * 2.399963
+				local dir = Vector3.new(math.sin(phi) * math.cos(theta), math.cos(phi), math.sin(phi) * math.sin(theta))
+				local tilt = CFrame.Angles(spin * 0.6, spin, spin * 0.35)
+				-- each part breathes in and out on its own rhythm: from the very centre (0) out to the full
+				-- radius and back, so parts pass through the middle instead of sitting on a shell
+				local rad = st.radius * (0.5 + 0.5 * math.sin(t * st.speed * (0.12 + (sl % 4) * 0.035) + sl * 1.7))
+				local pos = center + tilt:VectorToWorldSpace(dir) * rad
+				local orbit = CFrame.new(pos) * CFrame.Angles(t * 2 + sl, t * 1.3 + sl * 0.6, t * 1.7)
+				cf = r:Lerp(orbit, ease)
+			end
+			j.part.CFrame = cf
+		end
+	end
+end
+
+local function restore(player)
+	local st = states[player]
+	if not st then return end
+	states[player] = nil
+
+	if st.root and st.root.Parent then
+		pcall(place, st, 0)
+	end
+	for _, j in ipairs(st.joints) do
+		pcall(function()
+			if j.part.Parent then
+				j.part.Anchored = j.anchored
+				j.part.CanCollide = j.canCollide
+			end
+			if j.motor.Parent then
+				j.motor.Enabled = j.enabled
+			end
+		end)
+	end
+	pcall(function()
+		if st.hum and st.requiresNeck ~= nil then
+			st.hum.RequiresNeck = st.requiresNeck
+		end
+	end)
+end
+
+local function build(char, hum, root)
+	local st = {
+		char = char, hum = hum, root = root,
+		joints = {}, orbitCount = 0, blend = 0,
+		speed = 6, radius = 5,
+		requiresNeck = hum.RequiresNeck,
+	}
+
+	local motors = {}
+	for _, m in ipairs(char:GetDescendants()) do
+		if m:IsA("Motor6D") and m.Part0 and m.Part1 and m.Part1:IsDescendantOf(char) then
+			motors[#motors + 1] = m
+		end
+	end
+
+	-- walk outward from the root so every part is placed after the part it hangs off
+	local placed, done, slot = { [root] = true }, {}, 0
+	local progress = true
+	while progress do
+		progress = false
+		for _, m in ipairs(motors) do
+			if not done[m] and placed[m.Part0] and not placed[m.Part1] then
+				done[m], placed[m.Part1] = true, true
+				progress = true
+				local isHead = m.Part1.Name == "Head"
+				if not isHead then slot += 1 end
+				st.joints[#st.joints + 1] = {
+					motor = m, part = m.Part1, c0 = m.C0, c1 = m.C1,
+					enabled = m.Enabled, canCollide = m.Part1.CanCollide,
+					anchored = m.Part1.Anchored, head = isHead, slot = slot,
+				}
+			end
+		end
+	end
+	st.orbitCount = slot
+
+	-- the neck is about to be disabled, so don't let the humanoid die from it
+	hum.RequiresNeck = false
+	for _, j in ipairs(st.joints) do
+		j.motor.Enabled = false
+		j.part.CanCollide = false
+		j.part.Anchored = true -- server controls the position, replicates cleanly to everyone
+	end
+	return st
+end
+
+RunService.Heartbeat:Connect(function(dt)
+	for player, w in pairs(wants) do
+		local char = player.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		local root = hum and hum.RootPart
+
+		local st = states[player]
+		if st and (st.char ~= char or st.root ~= root) then
+			restore(player)
+			st = nil
+		end
+
+		if w.want and hum and root and hum.Health > 0 then
+			if not st then
+				st = build(char, hum, root)
+				states[player] = st
+			end
+			st.speed, st.radius = w.speed, w.radius
+			st.blend = math.min(1, st.blend + dt / 0.5)
+		elseif st then
+			st.blend = math.max(0, st.blend - dt / 0.5)
+			if st.blend <= 0 then
+				restore(player)
+				st = nil
+			end
+		end
+
+		if st then
+			local b = st.blend
+			place(st, b * b * (3 - 2 * b))
+		end
+	end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	restore(player)
+	wants[player] = nil
+	lastFire[player] = nil
+end)
+
+return
+end
+
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
@@ -241,7 +435,6 @@ local Settings = {
 	FlyVortex = false,
 	VortexSpeed = 6,
 	VortexRadius = 5,
-	VortexCollide = false,
 	Noclip = false,
 	Speed = false,
 	SpeedValue = 40,
@@ -263,8 +456,9 @@ local Settings = {
 local setESPEnabled
 local printTeamInfo
 
-local VORTEX_DISABLED = true
-local LockedSettings = { FlyVortex = true }
+-- vortex is enabled again. flip this to true to lock it off.
+local VORTEX_DISABLED = false
+local LockedSettings = {}
 
 local DisplayNames = {
 	Enabled = "Aimbot", ShowFOV = "FOV Circle", IgnoreFOV = "Ignore FOV", TeamCheck = "Team Check", Triggerbot = "Triggerbot",
@@ -431,7 +625,7 @@ local SAVE_BOOLS = {
 local SAVE_NUMBERS = {
 	FOV = { 20, 500 }, Smoothness = { 1, 100 }, TriggerDelay = { 0, 300 },
 	BlurAmount = { 1, 56 }, UITransparency = { 0, 70 }, FlySpeed = { 5, 1000 },
-	VortexSpeed = { 1, 20 }, VortexRadius = { 2, 14 }, SpeedValue = { 16, 250 },
+	VortexSpeed = { 1, 100 }, VortexRadius = { 2, 60 }, SpeedValue = { 16, 250 },
 	RageDistance = { 2, 20 }, OrbitSpeed = { 1, 30 },
 }
 local SAVE_THEME = { "Text", "Switch", "Accent", "Background", "Outline" }
@@ -1130,6 +1324,7 @@ end)
 corner(panel, 5)
 outline(panel)
 
+do
 local topLine = Instance.new("Frame")
 topLine.Size = UDim2.new(1, 0, 0, 2)
 topLine.BorderSizePixel = 0
@@ -1138,6 +1333,7 @@ topLine.Parent = panel
 bind(topLine, "BackgroundColor3", function()
 	return Theme.Accent
 end)
+end
 
 local titleBar = Instance.new("Frame")
 titleBar.Size = UDim2.new(1, 0, 0, TITLE_H)
@@ -1160,7 +1356,7 @@ local SUBTABS = {
 	},
 	visuals = { { id = "esp", label = "ESP" }, { id = "colours", label = "Colours" }, { id = "sky", label = "Sky" } },
 	settings = { { id = "general", label = "General" }, { id = "keybinds", label = "Keybinds" }, { id = "configs", label = "Configs" } },
-	movement = { { id = "fly", label = "Fly" }, { id = "vortex", label = "Vortex", disabled = true }, { id = "noclip", label = "Noclip" }, { id = "speed", label = "Speed" }, { id = "jump", label = "Jump" }, { id = "mousetp", label = "Mouse TP" } },
+	movement = { { id = "fly", label = "Fly" }, { id = "vortex", label = "Vortex" }, { id = "noclip", label = "Noclip" }, { id = "speed", label = "Speed" }, { id = "jump", label = "Jump" }, { id = "mousetp", label = "Mouse TP" } },
 }
 local SUB_H = 26
 local SUB_W = 80
@@ -1171,6 +1367,7 @@ tabBar.Position = UDim2.fromOffset(0, TITLE_H)
 tabBar.BackgroundTransparency = 1
 tabBar.Parent = panel
 
+do
 local titleLine = Instance.new("Frame")
 titleLine.Size = UDim2.new(1, 0, 0, 1)
 titleLine.Position = UDim2.fromOffset(0, TITLE_H)
@@ -1179,7 +1376,9 @@ titleLine.Parent = panel
 bind(titleLine, "BackgroundColor3", function()
 	return Theme.Outline
 end)
+end
 
+do
 local tabLine = Instance.new("Frame")
 tabLine.Size = UDim2.new(0, 1, 1, -(TITLE_H + FOOTER_H))
 tabLine.Position = UDim2.fromOffset(SIDE_W, TITLE_H)
@@ -1188,6 +1387,7 @@ tabLine.Parent = panel
 bind(tabLine, "BackgroundColor3", function()
 	return Theme.Outline
 end)
+end
 
 local underline = Instance.new("Frame")
 underline.Size = UDim2.fromOffset(2, TAB_ROW - 8)
@@ -1199,6 +1399,7 @@ bind(underline, "BackgroundColor3", function()
 	return Theme.Accent
 end)
 
+do
 local footer = newLabel(panel, "", 11, true)
 footer.AnchorPoint = Vector2.new(0, 1)
 footer.Position = UDim2.new(0, PAGE_X, 1, -5)
@@ -1206,6 +1407,7 @@ footer.Size = UDim2.new(1, -(PAGE_X + 8), 0, 12)
 addHint(footer, function()
 	return keyName(getBind("menu").input) .. "  -  hide / show menu"
 end)
+end
 
 local hud = Instance.new("TextLabel")
 hud.Size = UDim2.fromOffset(112, 32)
@@ -1526,12 +1728,14 @@ local function updateBlur()
 	TweenService:Create(blur, blurInfo, { Size = target }):Play()
 end
 
+do
 local modalBtn = Instance.new("TextButton")
 modalBtn.Size = UDim2.fromOffset(0, 0)
 modalBtn.BackgroundTransparency = 1
 modalBtn.Text = ""
 modalBtn.Modal = true
 modalBtn.Parent = panel
+end
 
 local function setMenuVisible(visible)
 	if visible and not menuOpen then
@@ -2548,16 +2752,35 @@ end
 
 do
 	local vortexPage = newPage("movement_vortex", true)
+	local w = newGroup(vortexPage, 2, "WARNING")
+	for _, line in ipairs({
+		"BUGGY / EXPERIMENTAL",
+		"can glitch your movement",
+		"or camera. If it breaks,",
+		"turn it off or reset your",
+		"character. Use at your",
+		"own risk.",
+	}) do
+		local n = addNote(w, line)
+		bind(n, "TextColor3", function() return Color3.fromRGB(235, 90, 90) end)
+	end
+
 	local g = newGroup(vortexPage, 1, "Vortex")
-	addCheckbox(g, "Vortex Mode", "FlyVortex")
-	addSlider(g, "Vortex Speed", 1, 20, "VortexSpeed")
-	addSlider(g, "Vortex Radius", 2, 14, "VortexRadius")
-	addCheckbox(g, "Vortex Collision", "VortexCollide")
+	addCheckbox(g, "Vortex Mode", "FlyVortex", function(on)
+		if on and toast then toast("Vortex is buggy - see the warning") end
+	end)
+	addSlider(g, "Vortex Speed", 1, 100, "VortexSpeed")
+	addSlider(g, "Vortex Radius", 2, 60, "VortexRadius")
 
 	local st = newGroup(vortexPage, 2, "Status")
 	vortexStatus = addNote(st, "Vortex: off")
 	vortexServerLabel = addNote(st, "Server: checking...")
+	addNote(st, "your body parts orbit you")
 	addNote(st, "works with or without fly")
+	addNote(st, "orbit head: only safe if the")
+	addNote(st, "server has RequiresNeck off")
+	addNote(st, "executor mode: joints are")
+	addNote(st, "destroyed so it replicates")
 
 	if VORTEX_DISABLED then
 
@@ -3143,7 +3366,8 @@ end
 local MAX_AIM_DISTANCE = 1000
 
 local function getTarget()
-	local mousePos = UserInputService:GetMouseLocation()
+	-- closest to the centre of the screen (same point the crosshair is at when the mouse is locked)
+	local mousePos = workspace.CurrentCamera.ViewportSize / 2
 	local best, bestDist = nil, Settings.IgnoreFOV and math.huge or Settings.FOV
 
 	local myChar = LocalPlayer.Character
@@ -4055,47 +4279,66 @@ track(RunService.Stepped:Connect(function(_, dt)
 	myRoot.AssemblyAngularVelocity = Vector3.zero
 end))
 
+-- ===== VORTEX (client / executor mode) =====
+-- Used when the server half of this file is NOT running in the game.
+-- Instead of just disabling the joints (which never replicates), this DESTROYS your character's
+-- Motor6D joints. You own your character's physics, so once the joints are gone the loose parts
+-- are simulated by YOU and the server relays their positions to everyone. We re-claim ownership
+-- with the executor functions below (each is optional and wrapped in pcall):
+--   sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
+--   setsimulationradius(math.huge, math.huge)
+-- Turning the vortex off rebuilds the joints. Animations can look stuck until you move / jump.
 local vortexRestoreAll, vortexRemote
 do
-local vortexStates = {}
+local vstate = nil
 
-local function vortexCollides(j)
-	return (Settings.VortexCollide and not Settings.Noclip and not j.head) and true or false
+local function claimNetwork()
+	pcall(function()
+		if type(sethiddenproperty) == "function" then
+			sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
+		end
+	end)
+	pcall(function()
+		if type(setsimulationradius) == "function" then
+			setsimulationradius(math.huge, math.huge)
+		end
+	end)
+	pcall(function()
+		LocalPlayer.MaximumSimulationRadius = math.huge
+	end)
 end
 
-local function vortexEase(st)
-	local b = st.blend
-	return b * b * (3 - 2 * b)
-end
-
-local function vortexPlace(st, root, ease)
-	local joints = st.joints
+local function placeAll(st, ease)
+	local root = st.root
 	local t = os.clock()
 	local spin = t * st.speed * 0.5
-	local radius = st.radius
 	local center = root.Position
 	local count = math.max(st.orbitCount, 1)
-
 	local rest = { [root] = root.CFrame }
 
-	for _, j in ipairs(joints) do
-		local m = j.motor
-		local p0 = m.Part0
-		if m.Parent and p0 and j.part.Parent then
-			local r = (rest[p0] or p0.CFrame) * j.c0 * m.Transform * j.c1:Inverse()
+	for _, j in ipairs(st.joints) do
+		local p0 = j.p0
+		if p0.Parent and j.part.Parent then
+			local r = (rest[p0] or p0.CFrame) * j.c0 * j.c1:Inverse()
 			rest[j.part] = r
 
 			local cf = r
 			if not j.head then
 				local sl = j.slot
-				local a = spin + (sl / count) * math.pi * 2
-				local rad = radius + (sl % 3) * 0.8
-				local h = math.sin(t * 1.5 + sl) * 2 + ((sl % 4) - 1.5) * 1.2
-				local pos = center + Vector3.new(math.cos(a) * rad, h, math.sin(a) * rad)
+				-- spread the parts over a sphere (golden-angle spiral), then tumble the whole sphere
+				-- so parts swing above and below you as well as around you
+				local k = (sl - 0.5) / count
+				local phi = math.acos(1 - 2 * k)
+				local theta = sl * 2.399963
+				local dir = Vector3.new(math.sin(phi) * math.cos(theta), math.cos(phi), math.sin(phi) * math.sin(theta))
+				local tilt = CFrame.Angles(spin * 0.6, spin, spin * 0.35)
+				-- each part breathes in and out on its own rhythm: from the very centre (0) out to the full
+				-- radius and back, so parts pass through the middle instead of sitting on a shell
+				local rad = st.radius * (0.5 + 0.5 * math.sin(t * st.speed * (0.12 + (sl % 4) * 0.035) + sl * 1.7))
+				local pos = center + tilt:VectorToWorldSpace(dir) * rad
 				local orbit = CFrame.new(pos) * CFrame.Angles(t * 2 + sl, t * 1.3 + sl * 0.6, t * 1.7)
 				cf = r:Lerp(orbit, ease)
 			end
-
 			j.part.CFrame = cf
 			j.part.AssemblyLinearVelocity = Vector3.zero
 			j.part.AssemblyAngularVelocity = Vector3.zero
@@ -4103,153 +4346,109 @@ local function vortexPlace(st, root, ease)
 	end
 end
 
-local function vortexRestore(plr)
-	local st = vortexStates[plr]
+-- skipRebuild = true when the character is already gone (respawn / death)
+local function vortexRestore(skipRebuild)
+	local st = vstate
 	if not st then return end
+	vstate = nil
+	if skipRebuild then return end
 
-	for _, c in ipairs(st.conns) do
-		pcall(function() c:Disconnect() end)
-	end
-	st.conns = {}
-
-	if st.root and st.root.Parent then
-		pcall(vortexPlace, st, st.root, 0)
-	end
-
+	pcall(placeAll, st, 0)
 	for _, j in ipairs(st.joints) do
 		pcall(function()
-			if j.part.Parent then
+			if j.part.Parent and j.p0.Parent then
 				j.part.CanCollide = j.canCollide
 				j.part.AssemblyLinearVelocity = Vector3.zero
-			end
-			if j.motor.Parent then
-				j.motor.C0 = j.c0
-				j.motor.Enabled = j.enabled
+				local m = Instance.new("Motor6D")
+				m.Name = j.name
+				m.C0 = j.c0
+				m.C1 = j.c1
+				m.Part0 = j.p0
+				m.Part1 = j.part
+				m.Parent = j.parent
 			end
 		end)
 	end
-
-	for _, c in ipairs(st.ncc) do
-		pcall(function() c:Destroy() end)
-	end
-	st.ncc = {}
-
 	pcall(function()
 		if st.hum and st.requiresNeck ~= nil then
 			st.hum.RequiresNeck = st.requiresNeck
 		end
 	end)
-
-	vortexStates[plr] = nil
+	pcall(function()
+		if st.cam and st.hum then st.cam.CameraSubject = st.hum end
+	end)
 end
 
 function vortexRestoreAll()
-	for plr in pairs(vortexStates) do
-		vortexRestore(plr)
-	end
+	vortexRestore(false)
 end
 
-local function vortexBuild(plr, char, hum, root)
+local function vortexBuild(char, hum, root)
 	local st = {
-		char = char,
-		hum = hum,
-		root = root,
-		joints = {},
-		orbitCount = 0,
-		blend = 0,
-		dirty = false,
-		requiresNeck = nil,
-		conns = {},
-		ncc = {},
-		speed = Settings.VortexSpeed,
-		radius = Settings.VortexRadius,
+		char = char, hum = hum, root = root,
+		joints = {}, orbitCount = 0, blend = 0,
+		speed = Settings.VortexSpeed, radius = Settings.VortexRadius,
+		requiresNeck = hum.RequiresNeck, lastClaim = 0,
 	}
-	vortexStates[plr] = st
 
 	local motors = {}
 	for _, m in ipairs(char:GetDescendants()) do
-		if m:IsA("Motor6D") and m.Part0 and m.Part1 and m.Part1:IsDescendantOf(char) then
+		-- the Neck joint is left alone: the server kills any character that loses it, and an
+		-- executor cannot turn that rule off. The head simply stays attached to the torso.
+		if m:IsA("Motor6D") and m.Name ~= "Neck" and m.Part0 and m.Part1 and m.Part1:IsDescendantOf(char) then
 			motors[#motors + 1] = m
 		end
 	end
 
-	local placed = { [root] = true }
-	local done = {}
-	local slot = 0
+	local placed, done, slot = { [root] = true }, {}, 0
 	local progress = true
 	while progress do
 		progress = false
 		for _, m in ipairs(motors) do
 			if not done[m] and placed[m.Part0] and not placed[m.Part1] then
-				done[m] = true
-				placed[m.Part1] = true
+				done[m], placed[m.Part1] = true, true
 				progress = true
-
 				local isHead = m.Part1.Name == "Head"
-				if not isHead then
-					slot += 1
-				end
-				table.insert(st.joints, {
-					motor = m,
-					part = m.Part1,
-					c0 = m.C0,
-					c1 = m.C1,
-					enabled = m.Enabled,
-					canCollide = m.Part1.CanCollide,
-					head = isHead,
-					slot = slot,
-				})
+				if not isHead then slot += 1 end
+				st.joints[#st.joints + 1] = {
+					motor = m, name = m.Name, parent = m.Parent,
+					p0 = m.Part0, part = m.Part1, c0 = m.C0, c1 = m.C1,
+					canCollide = m.Part1.CanCollide, head = isHead, slot = slot,
+				}
 			end
 		end
 	end
 	st.orbitCount = slot
 
-	if plr == LocalPlayer then
-		st.requiresNeck = hum.RequiresNeck
-		hum.RequiresNeck = false
-	end
-
+	-- the neck is about to be destroyed: don't let the humanoid die from it
+	hum.RequiresNeck = false
+	claimNetwork()
 	for _, j in ipairs(st.joints) do
-		j.motor.Enabled = false
-		j.part.CanCollide = vortexCollides(j)
+		pcall(function() j.motor:Destroy() end)
+		j.part.CanCollide = false
 	end
-
-	local headPart
-	for _, j in ipairs(st.joints) do
-		if j.head then headPart = j.part end
-	end
-	for _, j in ipairs(st.joints) do
-		if not j.head then
-			for _, other in ipairs({ root, headPart }) do
-				if other then
-					local c = Instance.new("NoCollisionConstraint")
-					c.Part0 = j.part
-					c.Part1 = other
-					c.Parent = j.part
-					table.insert(st.ncc, c)
-				end
-			end
-		end
-	end
-
-	table.insert(st.conns, char.DescendantAdded:Connect(function(d)
-		if d:IsA("Motor6D") then
-			st.dirty = true
-		end
-	end))
-
+	-- the camera normally follows the head, which now rides on the orbiting torso
+	pcall(function()
+		st.cam = workspace.CurrentCamera
+		st.cam.CameraSubject = root
+	end)
 	return st
 end
 
+-- placed before physics (Stepped) and again after it (Heartbeat)
 track(RunService.Stepped:Connect(function()
-	for _, st in pairs(vortexStates) do
-		if st.char and st.root and st.root.Parent then
-			for _, j in ipairs(st.joints) do
-				if j.part.Parent then
-					j.part.CanCollide = vortexCollides(j)
-				end
-			end
-			vortexPlace(st, st.root, vortexEase(st))
+	local st = vstate
+	if st and st.root.Parent then placeAll(st, st.blend * st.blend * (3 - 2 * st.blend)) end
+end))
+
+track(RunService.Heartbeat:Connect(function()
+	local st = vstate
+	if st and st.root.Parent then
+		placeAll(st, st.blend * st.blend * (3 - 2 * st.blend))
+		local now = os.clock()
+		if now - st.lastClaim > 1 then
+			st.lastClaim = now
+			claimNetwork()
 		end
 	end
 end))
@@ -4259,6 +4458,7 @@ task.spawn(function()
 end)
 local vortexSent = { want = false, speed = nil, radius = nil, at = 0 }
 
+-- tells the server half (if it exists) about the vortex
 local function sendVortex()
 	if not vortexRemote then return end
 	local want = (not VORTEX_DISABLED and alive and Settings.FlyVortex) and true or false
@@ -4274,70 +4474,54 @@ end
 
 local vortexLastError
 local function vortexFrame(dt)
-	for _, plr in ipairs(Players:GetPlayers()) do
-		local want, sp, rad
-		if VORTEX_DISABLED then
-			want = false
-		elseif plr == LocalPlayer then
-			want = alive and Settings.FlyVortex
-			sp, rad = Settings.VortexSpeed, Settings.VortexRadius
-		else
-			want = plr:GetAttribute("OULVortex") == true
-			sp = math.clamp(tonumber(plr:GetAttribute("OULVortexSpeed")) or 6, 1, 20)
-			rad = math.clamp(tonumber(plr:GetAttribute("OULVortexRadius")) or 5, 2, 14)
+	local serverSide = game:GetService("ReplicatedStorage"):GetAttribute("OULVortexServerSide") == true
+	-- when the server half is running IT does the vortex; drawing it here too would fight it
+	local want = (not VORTEX_DISABLED) and (not serverSide) and alive and Settings.FlyVortex
+
+	local char = LocalPlayer.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local root = (hum and hum.RootPart) or (char and char:FindFirstChild("HumanoidRootPart"))
+
+	local st = vstate
+	if st and (st.char ~= char or not root or st.root ~= root) then
+		vortexRestore(true)
+		st = nil
+	end
+
+	if want and hum and root and hum.Health > 0 then
+		if not st then
+			st = vortexBuild(char, hum, root)
+			vstate = st
 		end
-
-		local char = plr.Character
-		local hum = char and char:FindFirstChildOfClass("Humanoid")
-		local root = (hum and hum.RootPart) or (char and char:FindFirstChild("HumanoidRootPart"))
-
-		local st = vortexStates[plr]
-		if st and (st.char ~= char or not root or st.root ~= root) then
-			vortexRestore(plr)
+		st.speed, st.radius = Settings.VortexSpeed, Settings.VortexRadius
+		st.blend = math.min(1, st.blend + dt / 0.5)
+	elseif st then
+		st.blend = math.max(0, st.blend - dt / 0.5)
+		if st.blend <= 0 then
+			vortexRestore(false)
 			st = nil
 		end
+	end
 
-		if want and hum and root and hum.Health > 0 then
-			if not st then
-				st = vortexBuild(plr, char, hum, root)
-			elseif st.dirty then
-				local keep = st.blend
-				vortexRestore(plr)
-				st = vortexBuild(plr, char, hum, root)
-				st.blend = keep
-			end
-			st.speed, st.radius = sp, rad
-			st.blend = math.min(1, st.blend + dt / 0.5)
+	if vortexStatus then
+		local msg
+		if VORTEX_DISABLED then
+			msg = "disabled"
+		elseif serverSide then
+			msg = Settings.FlyVortex and "on (server-side)" or "off"
+		elseif not Settings.FlyVortex then
+			msg = "off"
+		elseif not (hum and root) then
+			msg = "waiting for character"
+		elseif st and st.orbitCount == 0 then
+			msg = "no joints found"
 		elseif st then
-			st.blend = math.max(0, st.blend - dt / 0.5)
-			if st.blend <= 0 then
-				vortexRestore(plr)
-				st = nil
-			end
+			msg = "on, " .. st.orbitCount .. " parts (executor)"
+		else
+			msg = "starting"
 		end
-
-		if st and root then
-			vortexPlace(st, root, vortexEase(st))
-		end
-
-		if plr == LocalPlayer and vortexStatus then
-			local msg
-			if VORTEX_DISABLED then
-				msg = "disabled"
-			elseif not Settings.FlyVortex then
-				msg = "off"
-			elseif not (hum and root) then
-				msg = "waiting for character"
-			elseif st and st.orbitCount == 0 then
-				msg = "no joints found"
-			elseif st then
-				msg = "on, " .. st.orbitCount .. " parts"
-			else
-				msg = "starting"
-			end
-			vortexStatus.Text = "Vortex: " .. msg
-			vortexServerLabel.Text = vortexRemote and "Server: connected" or "Server: not found"
-		end
+		vortexStatus.Text = "Vortex: " .. msg
+		vortexServerLabel.Text = (vortexRemote and serverSide) and "Server: ok (all see it)" or "Server: none (executor)"
 	end
 
 	sendVortex()
@@ -4355,8 +4539,6 @@ track(RunService.RenderStepped:Connect(function(dt)
 		end
 	end
 end))
-
-track(Players.PlayerRemoving:Connect(vortexRestore))
 end
 
 -- ===== PANIC =====
@@ -4455,6 +4637,7 @@ local aimEndedAt = 0
 local savedCFrame = nil
 
 local aiming = false
+local lockedPart = nil -- the part we are locked onto while the aim key is held
 
 track(UserInputService.InputEnded:Connect(function(input)
 	if inputMatches(input, getBind("aim").input) then
@@ -4492,10 +4675,35 @@ RunService:BindToRenderStep("Aimbot", Enum.RenderPriority.Camera.Value + 1, func
 
 	local mouseLocked = UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
 	aiming = Settings.Enabled and Settings.Holding and mouseLocked and not menuOpen
-	if not aiming then return end
+	if not aiming then
+		lockedPart = nil -- released (or aimbot off): the next hold picks a fresh target
+		return
+	end
 
-	local target = getTarget()
-	if not target then return end
+	-- lock on when the aim key goes down and stay on that target (no switching to whoever is
+	-- closer), but DROP the lock the moment the target is no longer a valid thing to aim at:
+	--   * they died or left
+	--   * they went off screen
+	--   * they are behind a wall (the wall check setting)
+	-- after a drop it picks the closest visible player inside the FOV circle again, if any
+	if lockedPart then
+		local model = lockedPart:FindFirstAncestorOfClass("Model")
+		local valid = lockedPart.Parent ~= nil and model ~= nil and isAlive(model)
+		if valid then
+			local _, onScreen = Camera:WorldToViewportPoint(lockedPart.Position)
+			if not onScreen or not isVisible(lockedPart, model) then
+				valid = false
+			end
+		end
+		if not valid then
+			lockedPart = nil
+		end
+	end
+	if not lockedPart then
+		lockedPart = getTarget()
+		if not lockedPart then return end
+	end
+	local target = lockedPart
 
 	local s = math.clamp(Settings.Smoothness / 100, 0, 0.98)
 	local alpha = 1 - s ^ (dt * 60)
