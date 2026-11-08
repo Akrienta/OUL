@@ -4,15 +4,6 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local Lighting = game:GetService("Lighting")
 
--- =====================================================================================
--- ONE FILE, TWO JOBS
---   * Run it through your executor  -> the client menu below runs (IsServer() is false).
---   * Also paste this SAME file into a Script in ServerScriptService -> the block directly
---     below runs on the server and does the vortex so EVERYONE sees it.
--- The server block does the vortex itself: it disables the player's Motor6D joints and moves
--- the loose body parts in an orbit (parts are anchored, so the server fully controls them).
--- Server changes replicate to every player, even ones not running the menu.
--- =====================================================================================
 if RunService:IsServer() then
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -23,11 +14,10 @@ if not remote then
 	remote.Parent = ReplicatedStorage
 end
 
--- tells the menu "the server is handling the vortex, don't draw it locally"
 ReplicatedStorage:SetAttribute("OULVortexServerSide", true)
 
-local wants = {}   -- [player] = { want, speed, radius }
-local states = {}  -- [player] = build state
+local wants = {}
+local states = {}
 local lastFire = {}
 
 remote.OnServerEvent:Connect(function(player, want, speed, radius)
@@ -64,15 +54,13 @@ local function place(st, ease)
 			local cf = r
 			if not j.head then
 				local sl = j.slot
-				-- spread the parts over a sphere (golden-angle spiral), then tumble the whole sphere
-				-- so parts swing above and below you as well as around you
+
 				local k = (sl - 0.5) / count
 				local phi = math.acos(1 - 2 * k)
 				local theta = sl * 2.399963
 				local dir = Vector3.new(math.sin(phi) * math.cos(theta), math.cos(phi), math.sin(phi) * math.sin(theta))
 				local tilt = CFrame.Angles(spin * 0.6, spin, spin * 0.35)
-				-- each part breathes in and out on its own rhythm: from the very centre (0) out to the full
-				-- radius and back, so parts pass through the middle instead of sitting on a shell
+
 				local rad = st.radius * (0.5 + 0.5 * math.sin(t * st.speed * (0.12 + (sl % 4) * 0.035) + sl * 1.7))
 				local pos = center + tilt:VectorToWorldSpace(dir) * rad
 				local orbit = CFrame.new(pos) * CFrame.Angles(t * 2 + sl, t * 1.3 + sl * 0.6, t * 1.7)
@@ -124,7 +112,6 @@ local function build(char, hum, root)
 		end
 	end
 
-	-- walk outward from the root so every part is placed after the part it hangs off
 	local placed, done, slot = { [root] = true }, {}, 0
 	local progress = true
 	while progress do
@@ -145,12 +132,11 @@ local function build(char, hum, root)
 	end
 	st.orbitCount = slot
 
-	-- the neck is about to be disabled, so don't let the humanoid die from it
 	hum.RequiresNeck = false
 	for _, j in ipairs(st.joints) do
 		j.motor.Enabled = false
 		j.part.CanCollide = false
-		j.part.Anchored = true -- server controls the position, replicates cleanly to everyone
+		j.part.Anchored = true
 	end
 	return st
 end
@@ -268,10 +254,6 @@ local SLIDE = TweenInfo.new(0.24, Enum.EasingStyle.Quint, Enum.EasingDirection.O
 
 local FONT = Enum.Font.RobotoMono
 
--- ===== LOGO =====
--- Option A: upload Neon_OUL_Circular_Tech_Emblem.png in Creator Hub and paste the ID here.
--- Option B: put the PNG in your executor workspace folder named OUL_logo.png.
--- If neither is set, a built-in purple/blue ring emblem is drawn instead, so it always shows something.
 local LOGO_ID = ""
 local LOGO_FILE = "OUL_logo.png"
 local LOGO_PURPLE = Color3.fromRGB(145, 90, 255)
@@ -302,12 +284,11 @@ local function makeLogo(parent, size, x, y, zIndex)
 		img.Image = src
 		img.ZIndex = zIndex
 		img.Parent = parent
-		-- crops the PNG's black square background into a circle
+
 		Instance.new("UICorner", img).CornerRadius = UDim.new(1, 0)
 		return img
 	end
 
-	-- built-in emblem: gradient ring with "OUL" inside
 	local ring = Instance.new("Frame")
 	ring.Name = "OULLogo"
 	ring.BackgroundTransparency = 1
@@ -355,7 +336,6 @@ local function apply(obj, props, animate)
 	end
 end
 
--- default theme matches the OUL logo: near-black navy, purple-to-blue accents, white text
 local Theme = {
 	Text = Color3.fromRGB(228, 232, 255),
 	Switch = Color3.fromRGB(88, 122, 255),
@@ -412,7 +392,7 @@ local Settings = {
 	Smoothness = 1,
 	Triggerbot = false,
 	TriggerDelay = 50,
-	TriggerOnClick = false, -- only auto-shoot while left click is held
+	TriggerOnClick = false,
 	ESP = true,
 	Chams = true,
 	BlurEnabled = true,
@@ -440,23 +420,24 @@ local Settings = {
 	SpeedValue = 40,
 	InfiniteJump = false,
 	Notifications = true,
-	TargetNPCs = true, 
-	ESPNPCs = true, 
+	TargetNPCs = true,
+	ESPNPCs = true,
 	MouseTP = true,
 	KeybindList = true,
-	Ragebot = false, 
-	RageDistance = 4, 
+	Ragebot = false,
+	RageDistance = 4,
 	RageBehind = true,
 	RageAbove = false,
 	RageBelow = false,
 	RageOrbit = false,
 	OrbitSpeed = 6,
+	RageMode = "Closest",
+	RageTarget = "",
 }
 
 local setESPEnabled
 local printTeamInfo
 
--- vortex is enabled again. flip this to true to lock it off.
 local VORTEX_DISABLED = false
 local LockedSettings = {}
 
@@ -573,7 +554,6 @@ local saveStatusText = "saving: connecting..."
 local saveStatusLabel
 local saveNowFn = function() end
 
--- remembered on-screen positions (watermark + keybind list). nil = use the default spot
 local Positions = {}
 local function posToArr(p)
 	return { p.X.Scale, p.X.Offset, p.Y.Scale, p.Y.Offset }
@@ -586,7 +566,6 @@ local function arrToPos(a)
 	return UDim2.new(math.clamp(a[1], 0, 1), math.clamp(a[2], -4000, 4000), math.clamp(a[3], 0, 1), math.clamp(a[4], -4000, 4000))
 end
 
--- shared hooks for config profiles (filled in by the save block + Configs page)
 local ConfigAPI = {
 	available = false,
 	colorRefreshers = {},
@@ -612,8 +591,6 @@ do
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- save format version. v2 = logo-matched default theme; older saves keep their settings
--- but their old menu colours are ignored once so the new look shows up
 local SAVE_VERSION = 2
 
 local SAVE_BOOLS = {
@@ -668,6 +645,8 @@ local function takeSnapshot()
 		snap.settings[k] = Settings[k]
 	end
 	snap.settings.AimPart = Settings.AimPart
+	snap.settings.RageMode = Settings.RageMode
+	snap.settings.RageTarget = Settings.RageTarget
 	for _, k in ipairs(SAVE_THEME) do
 		snap.theme[k] = colorToArr(Theme[k])
 	end
@@ -694,8 +673,9 @@ local function applySaved(d)
 		end
 	end
 	if s.AimPart == "Head" or s.AimPart == "Body" then Settings.AimPart = s.AimPart end
+	if s.RageMode == "Closest" or s.RageMode == "Selected" then Settings.RageMode = s.RageMode end
+	if type(s.RageTarget) == "string" then Settings.RageTarget = s.RageTarget:sub(1, 24) end
 
-	-- old (pre-logo) saves keep the new default theme; saves from now on keep your picked colours
 	if type(d.v) == "number" and d.v >= SAVE_VERSION then
 		local t = type(d.theme) == "table" and d.theme or {}
 		for _, k in ipairs(SAVE_THEME) do
@@ -873,7 +853,6 @@ else
 	end
 end
 
--- ===== CONFIG PROFILES =====
 local CONFIG_DIR = "OULConfigs"
 local AUTOLOAD_FILE = CONFIG_DIR .. "/_autoload.txt"
 
@@ -945,7 +924,6 @@ function ConfigAPI.delete(name)
 	end)
 end
 
--- apply the autoload config on startup (runs before the menu is built)
 if ConfigAPI.available then
 	local auto = ConfigAPI.getAutoload()
 	local exists = auto and select(2, pcall(isfile, cfgPath(auto)))
@@ -956,9 +934,6 @@ if ConfigAPI.available then
 end
 end
 
--- true only for living characters / NPCs. filters out corpses and ragdolls:
--- zero health, Dead state, "dead" flags, clones named after a player, and
--- anything sitting in a ragdoll / corpse style folder
 local CORPSE_WORDS = { "ragdoll", "corpse", "dead", "bodies", "debris", "gib" }
 local function isAlive(model)
 	local hum = model:FindFirstChildOfClass("Humanoid")
@@ -969,7 +944,7 @@ local function isAlive(model)
 	end
 
 	if not Players:GetPlayerFromCharacter(model) then
-		-- a model named after a real player that isn't their character is a body clone
+
 		if Players:FindFirstChild(model.Name) then return false end
 		local node = model
 		while node and node ~= workspace do
@@ -983,7 +958,6 @@ local function isAlive(model)
 	return true
 end
 
--- non-player humanoids (NPCs). always scanned; used by the aimbot, triggerbot and ESP
 local npcCache = {}
 task.spawn(function()
 	while alive do
@@ -1002,7 +976,6 @@ task.spawn(function()
 	end
 end)
 
--- everything ESP draws: {key, character}; key is the Player, or the model for NPCs
 local function espEntities()
 	local list = {}
 	for _, plr in ipairs(Players:GetPlayers()) do
@@ -1162,7 +1135,6 @@ local function refreshESP()
 		end
 	end
 
-	-- drop ESP for NPCs that are gone
 	for key in pairs(highlights) do
 		if not seen[key] then removeESP(key) end
 	end
@@ -1170,7 +1142,6 @@ local function refreshESP()
 		if not seen[key] then removeTag(key) end
 	end
 
-	-- players first, then nearest
 	table.sort(list, function(a, b)
 		if a.npc ~= b.npc then return not a.npc end
 		return a.dist < b.dist
@@ -1480,7 +1451,6 @@ do
 	end))
 end
 
--- ===== KEYBIND LIST (draggable, position is saved) =====
 local keyList = Instance.new("Frame")
 keyList.Name = "KeybindList"
 keyList.Size = UDim2.fromOffset(150, 0)
@@ -1557,7 +1527,7 @@ do
 end
 
 do
-	-- menu-only options aren't cheats, so they stay off the list
+
 	local SKIP = { menu = true, panic = true, Watermark = true, BlurEnabled = true, Notifications = true, KeybindList = true }
 	local rows = {}
 	local lastSig
@@ -2131,7 +2101,7 @@ local PALETTE = {
 }
 
 local BACKGROUNDS = {
-	Color3.fromRGB(8, 9, 20), -- OUL logo navy (default)
+	Color3.fromRGB(8, 9, 20),
 	Color3.fromRGB(18, 18, 23),
 	Color3.fromRGB(8, 8, 10),
 	Color3.fromRGB(30, 30, 30),
@@ -2339,7 +2309,6 @@ local function addColor(parent, text, colors, onPick, default, hueS, hueV)
 		end
 	end
 
-	-- lets a loaded config refresh this picker's preview + selected swatch
 	local getCurrent = ConfigAPI.colorGetters[text]
 	if getCurrent then
 		table.insert(ConfigAPI.colorRefreshers, function()
@@ -2568,7 +2537,6 @@ onTheme(function()
 	refreshTabs(true)
 end)
 
-
 do
 	local aimPage = newPage("combat_aimbot", true)
 	local g = newGroup(aimPage, 1, "Aimbot")
@@ -2637,8 +2605,8 @@ do
 	local ragePage = newPage("combat_ragebot", true)
 	local g = newGroup(ragePage, 1, "Ragebot")
 	addCheckbox(g, "Rage", "Ragebot")
+	addSegment(g, "Mode", "RageMode", "Closest", "Selected")
 
-	-- only one position mode at a time
 	local rageModes = { "RageBehind", "RageAbove", "RageBelow" }
 	local function modeChanged(key)
 		return function(on)
@@ -2658,13 +2626,118 @@ do
 	addCheckbox(g, "Orbit", "RageOrbit")
 	addSlider(g, "Orbit Speed", 1, 30, "OrbitSpeed")
 
+	local sel = newGroup(ragePage, 2, "Selected Target")
+
+	local box = Instance.new("TextBox")
+	box.Size = UDim2.new(1, 0, 0, 22)
+	box.BorderSizePixel = 0
+	box.ClearTextOnFocus = false
+	box.PlaceholderText = "username..."
+	box.Text = Settings.RageTarget
+	box.Font = FONT
+	box.TextSize = 12
+	box.TextXAlignment = Enum.TextXAlignment.Left
+	box.LayoutOrder = nextOrder(sel)
+	box.Parent = sel
+	bind(box, "BackgroundColor3", function() return Theme.Field end)
+	bind(box, "TextColor3", function() return Theme.Text end)
+	bind(box, "PlaceholderColor3", function() return Theme.Dim end)
+	corner(box, 3)
+	outline(box, 0.4)
+	do
+		local bp = Instance.new("UIPadding")
+		bp.PaddingLeft = UDim.new(0, 6)
+		bp.Parent = box
+	end
+
+	local plist = Instance.new("ScrollingFrame")
+	plist.Size = UDim2.new(1, 0, 0, 96)
+	plist.BorderSizePixel = 0
+	plist.ScrollBarThickness = 3
+	plist.CanvasSize = UDim2.new()
+	plist.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	plist.LayoutOrder = nextOrder(sel)
+	plist.Parent = sel
+	bind(plist, "BackgroundColor3", function() return Theme.Field end)
+	corner(plist, 3)
+	outline(plist, 0.4)
+	do
+		local ll = Instance.new("UIListLayout")
+		ll.Padding = UDim.new(0, 2)
+		ll.SortOrder = Enum.SortOrder.LayoutOrder
+		ll.Parent = plist
+		local lp = Instance.new("UIPadding")
+		lp.PaddingTop = UDim.new(0, 3)
+		lp.PaddingLeft = UDim.new(0, 3)
+		lp.PaddingRight = UDim.new(0, 3)
+		lp.Parent = plist
+	end
+
+	local lastSig
+	local function rebuildPlayers()
+		local names = {}
+		for _, plr in ipairs(Players:GetPlayers()) do
+			if plr ~= LocalPlayer then names[#names + 1] = plr.Name end
+		end
+		table.sort(names, function(a, b) return a:lower() < b:lower() end)
+
+		local q = string.lower(Settings.RageTarget or "")
+		local sig = table.concat(names, "|") .. "#" .. q
+		if sig == lastSig then return end
+		lastSig = sig
+
+		for _, c in ipairs(plist:GetChildren()) do
+			if c:IsA("TextButton") then c:Destroy() end
+		end
+		for i, name in ipairs(names) do
+			local on = (q ~= "" and string.lower(name) == q)
+			local b = Instance.new("TextButton")
+			b.Size = UDim2.new(1, -6, 0, 20)
+			b.BorderSizePixel = 0
+			b.AutoButtonColor = false
+			b.Font = FONT
+			b.TextSize = 12
+			b.TextXAlignment = Enum.TextXAlignment.Left
+			b.LayoutOrder = i
+			b.Text = "  " .. name
+			b.BackgroundTransparency = on and 0 or 1
+			b.BackgroundColor3 = Theme.Accent
+			b.TextColor3 = on and Color3.fromRGB(255, 255, 255) or Theme.Text
+			b.Parent = plist
+			corner(b, 3)
+			b.MouseButton1Click:Connect(function()
+				Settings.RageTarget = name
+				box.Text = name
+				lastSig = nil
+				rebuildPlayers()
+			end)
+		end
+	end
+
+	box.FocusLost:Connect(function()
+		Settings.RageTarget = string.gsub(box.Text, "^%s+", ""):gsub("%s+$", ""):sub(1, 24)
+		lastSig = nil
+		rebuildPlayers()
+	end)
+	refreshers.RageTarget = function()
+		box.Text = Settings.RageTarget
+		lastSig = nil
+		rebuildPlayers()
+	end
+	onTheme(function() lastSig = nil rebuildPlayers() end)
+	track(Players.PlayerAdded:Connect(function() task.defer(rebuildPlayers) end))
+	track(Players.PlayerRemoving:Connect(function() task.defer(rebuildPlayers) end))
+	rebuildPlayers()
+
 	local info = newGroup(ragePage, 2, "Info")
 	rageStatus = addNote(info, "Target: none")
 	addHint(addNote(info, ""), function()
 		return keyName(getBind("Ragebot").input) .. "  -  rage on / off"
 	end)
-	addNote(info, "sticks you to the closest")
-	addNote(info, "player until they die:")
+	addNote(info, "Closest: sticks you to the")
+	addNote(info, "nearest player until they die")
+	addNote(info, "Selected: sticks to the name")
+	addNote(info, "picked above (ignores teams)")
 	addNote(info, "behind, above or below")
 	addNote(info, "orbit: spin around them")
 	addNote(info, "(distance = orbit radius)")
@@ -2696,7 +2769,7 @@ do
 	addNote(info, "boxes: outline + optional")
 	addNote(info, "see-through fill")
 	addNote(info, "skeleton: bone lines")
-	addNote(info, "health: HP under feet")
+	addNote(info, "health: bar beside player")
 	addNote(info, "colours are in Colours")
 end
 
@@ -3000,7 +3073,6 @@ do
 	end)
 end
 
--- ===== CONFIG PROFILES PAGE =====
 do
 	local cfgPage = newPage("settings_configs", true)
 	local g = newGroup(cfgPage, 1, "Configs")
@@ -3013,7 +3085,6 @@ do
 		local BLUE, BLUE_H = Color3.fromRGB(70, 90, 140), Color3.fromRGB(90, 112, 170)
 		local RED, RED_H = Color3.fromRGB(170, 55, 65), Color3.fromRGB(205, 75, 85)
 
-		-- after a config is loaded, push the new values into every widget
 		local function reloadUI()
 			for _, fn in pairs(refreshers) do pcall(fn, true) end
 			setChamColor(ESPColors.Fill)
@@ -3031,7 +3102,6 @@ do
 			setESPEnabled()
 		end
 
-		-- list of saved configs
 		local list = Instance.new("ScrollingFrame")
 		list.Size = UDim2.new(1, 0, 0, 120)
 		list.BorderSizePixel = 0
@@ -3101,7 +3171,6 @@ do
 		end
 		onTheme(rebuild)
 
-		-- manage column
 		local m = newGroup(cfgPage, 2, "Manage")
 
 		local box = Instance.new("TextBox")
@@ -3233,7 +3302,7 @@ setMenuVisible(true)
 
 local canDamage
 do
--- any attribute / value object whose name looks team-related counts as a team field
+
 local TEAM_WORDS = { "team", "squad", "faction", "side", "clan", "party", "alliance" }
 local NOT_TEAM_WORDS = { "kill", "score", "death", "point", "damage", "rank", "level", "win", "count", "size", "chat" }
 local function isTeamName(name)
@@ -3267,14 +3336,13 @@ local function collect(inst, out)
 	end
 end
 
--- true = teammate, false = enemy, nil = can't tell
 local function sameTeam(plr)
 	local me = LocalPlayer
-	-- 1) Roblox Teams service
+
 	if me.Team and plr.Team then
 		return me.Team == plr.Team
 	end
-	-- 2) any team-looking field on the player, their character, or leaderstats
+
 	local a, b = {}, {}
 	collect(me, a)
 	collect(me.Character, a)
@@ -3288,15 +3356,13 @@ local function sameTeam(plr)
 		end
 	end
 	if differ then return false end
-	-- 3) plain TeamColor when both players are on a team
+
 	if not me.Neutral and not plr.Neutral then
 		return me.TeamColor == plr.TeamColor
 	end
 	return nil
 end
 
--- returns false for players you cannot damage (teammates, spawn-protected).
--- every combat feature should call this before picking a target.
 canDamage = function(plr)
 	if not Settings.TeamCheck then return true end
 	local char = plr.Character
@@ -3366,7 +3432,7 @@ end
 local MAX_AIM_DISTANCE = 1000
 
 local function getTarget()
-	-- closest to the centre of the screen (same point the crosshair is at when the mouse is locked)
+
 	local mousePos = workspace.CurrentCamera.ViewportSize / 2
 	local best, bestDist = nil, Settings.IgnoreFOV and math.huge or Settings.FOV
 
@@ -3412,7 +3478,6 @@ end
 local triggerSeenAt = nil
 local lastShot = 0
 
--- tracks the REAL left mouse button; clicks the script sends itself are ignored
 local leftHeld = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
 local synth = { began = 0, ended = 0, expires = 0 }
 local function markSynthetic()
@@ -3449,7 +3514,6 @@ local function playerUnderCrosshair()
 	local result = workspace:Raycast(ray.Origin, ray.Direction * MAX_AIM_DISTANCE, params)
 	if not result then return nil end
 
-	-- walk up to the model that holds a humanoid
 	local model = result.Instance:FindFirstAncestorOfClass("Model")
 	while model and not model:FindFirstChildOfClass("Humanoid") do
 		model = model.Parent and model.Parent:FindFirstAncestorOfClass("Model")
@@ -3645,9 +3709,7 @@ track(RunService.RenderStepped:Connect(function()
 			local shown = false
 
 			if hum and root and hum.Health > 0 then
-				-- project the 8 corners of a character-sized box (it turns with the player's
-				-- facing) and wrap them, so the outline keeps its size from any angle,
-				-- including looking straight down on someone
+
 				local look = root.CFrame.LookVector
 				local yaw = (look.X * look.X + look.Z * look.Z > 0.0001) and math.atan2(-look.X, -look.Z) or 0
 				local base = CFrame.new(root.Position) * CFrame.Angles(0, yaw, 0)
@@ -3700,7 +3762,6 @@ track(RunService.RenderStepped:Connect(function()
 	end
 end))
 
--- ===== SKELETON ESP: bone lines between a character's joints =====
 do
 	local skeletons = {}
 	local SKELETON_MAX_DISTANCE = 1000
@@ -3714,7 +3775,6 @@ do
 	end
 	track(Players.PlayerRemoving:Connect(removeSkeleton))
 
-	-- every Motor6D that joins two body parts becomes one bone
 	local function buildJoints(char)
 		local out = {}
 		for _, part in ipairs(char:GetChildren()) do
@@ -3816,32 +3876,51 @@ do
 	end))
 end
 
--- ===== HEALTH ESP: shows current HP under each player / NPC =====
 do
-	local hpTags = {}
+	local bars = {}
 
-	local function removeHealth(key)
-		local t = hpTags[key]
-		if t then
-			t.gui:Destroy()
-			hpTags[key] = nil
+	local function removeBar(key)
+		local b = bars[key]
+		if b then
+			b.bg:Destroy()
+			bars[key] = nil
 		end
 	end
-	track(Players.PlayerRemoving:Connect(removeHealth))
+	track(Players.PlayerRemoving:Connect(removeBar))
+
+	local function screenBounds(cam, root)
+		local look = root.CFrame.LookVector
+		local yaw = (look.X * look.X + look.Z * look.Z > 0.0001) and math.atan2(-look.X, -look.Z) or 0
+		local base = CFrame.new(root.Position) * CFrame.Angles(0, yaw, 0)
+		local minX, minY, maxX, maxY = math.huge, math.huge, -math.huge, -math.huge
+		for i = 0, 7 do
+			local sx = (i % 2 == 0) and -2 or 2
+			local sy = (math.floor(i / 2) % 2 == 0) and -3.2 or 2.8
+			local sz = (i < 4) and -1 or 1
+			local sp = cam:WorldToViewportPoint(base:PointToWorldSpace(Vector3.new(sx, sy, sz)))
+			if sp.Z <= 0 then return nil end
+			minX = math.min(minX, sp.X)
+			maxX = math.max(maxX, sp.X)
+			minY = math.min(minY, sp.Y)
+			maxY = math.max(maxY, sp.Y)
+		end
+		return minX, minY, maxX, maxY
+	end
 
 	track(RunService.RenderStepped:Connect(function()
 		if not (Settings.ESP and Settings.ESPHealth) then
-			for key in pairs(hpTags) do removeHealth(key) end
+			for key in pairs(bars) do removeBar(key) end
 			return
 		end
 
+		local cam = workspace.CurrentCamera
 		local ents = espEntities()
 		local live = {}
 		for _, e in ipairs(ents) do
 			if e[2] then live[e[1]] = true end
 		end
-		for key in pairs(hpTags) do
-			if not live[key] then removeHealth(key) end
+		for key in pairs(bars) do
+			if not live[key] then removeBar(key) end
 		end
 
 		for _, ent in ipairs(ents) do
@@ -3849,49 +3928,47 @@ do
 			if char then
 				local hum = char:FindFirstChildOfClass("Humanoid")
 				local root = char:FindFirstChild("HumanoidRootPart")
-				local t = hpTags[key]
-				if t and t.gui.Adornee ~= root then
-					removeHealth(key)
-					t = nil
+				local b = bars[key]
+				local shown = false
+
+				if hum and root and hum.Health > 0 then
+					local minX, minY, maxX, maxY = screenBounds(cam, root)
+					if minX and maxY - minY > 2 then
+						shown = true
+						if not b then
+							local bg = Instance.new("Frame")
+							bg.Name = "OULHealthBar"
+							bg.BorderSizePixel = 0
+							bg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+							bg.BackgroundTransparency = 0.35
+							bg.Parent = gui
+							local fill = Instance.new("Frame")
+							fill.BorderSizePixel = 0
+							fill.AnchorPoint = Vector2.new(0, 1)
+							fill.Parent = bg
+							b = { bg = bg, fill = fill }
+							bars[key] = b
+						end
+
+						local h = maxY - minY
+						local pct = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
+						b.bg.Position = UDim2.fromOffset(minX - 7, minY)
+						b.bg.Size = UDim2.fromOffset(4, h)
+						b.fill.Position = UDim2.new(0, 1, 1, -1)
+						b.fill.Size = UDim2.new(1, -2, 0, math.max((h - 2) * pct, 0))
+						b.fill.BackgroundColor3 = Color3.fromRGB(235, 70, 70):Lerp(Color3.fromRGB(90, 220, 120), pct)
+						b.bg.Visible = true
+					end
 				end
 
-				if hum and root then
-					if not t then
-						local g = Instance.new("BillboardGui")
-						g.Name = "ESPHealth"
-						g.Adornee = root
-						g.AlwaysOnTop = true
-						g.Size = UDim2.fromOffset(100, 16)
-						g.StudsOffset = Vector3.new(0, -3.6, 0)
-
-						local l = Instance.new("TextLabel")
-						l.Size = UDim2.new(1, 0, 1, 0)
-						l.BackgroundTransparency = 1
-						l.Font = Enum.Font.GothamBold
-						l.TextSize = 13
-						l.TextStrokeTransparency = 0.4
-						l.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-						l.Parent = g
-
-						g.Parent = espFolder
-						t = { gui = g, label = l }
-						hpTags[key] = t
-					end
-
-					local pct = math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1)
-					t.label.Text = math.floor(hum.Health + 0.5) .. " HP"
-					t.label.TextColor3 = Color3.fromRGB(235, 70, 70):Lerp(Color3.fromRGB(90, 220, 120), pct)
+				if not shown and b then
+					b.bg.Visible = false
 				end
 			end
 		end
 	end))
 end
 
--- ===== SKYBOX: recolour the sky =====
--- replaces the game's Sky with one whose six faces are a 1x1 picture of your colour
--- (the picture is generated here and saved as a tiny PNG in your executor workspace,
--- so it needs writefile + getcustomasset). The game's own Sky and Atmosphere are
--- hidden while it's on and put back when you turn it off or unload.
 do
 	local stash = {}
 	local mySky
@@ -3900,7 +3977,6 @@ do
 	local assets, files = {}, {}
 	local canFiles = type(writefile) == "function" and type(getcustomasset) == "function"
 
-	-- ---- minimal PNG writer (solid colour, 1x1) ----
 	local function be32(n)
 		return string.char(
 			math.floor(n / 16777216) % 256,
@@ -3938,7 +4014,7 @@ do
 	end
 
 	local function solidPNG(r, g, b)
-		local raw = string.char(0, r, g, b) -- filter byte + one RGB pixel
+		local raw = string.char(0, r, g, b)
 		local a, bb = 1, 0
 		for i = 1, #raw do
 			a = (a + raw:byte(i)) % 65521
@@ -3953,7 +4029,6 @@ do
 		return math.clamp(math.floor(v * 255 / 8 + 0.5) * 8, 0, 255)
 	end
 
-	-- returns the sky picture for a colour (made once, then reused)
 	local function skyAsset(c)
 		local r, g, b = q(c.R), q(c.G), q(c.B)
 		local key = string.format("%02X%02X%02X", r, g, b)
@@ -4021,7 +4096,6 @@ do
 				return
 			end
 
-			-- once a second: re-hide any sky the game adds, and re-add ours if it gets removed
 			scanTimer += dt
 			if scanTimer >= 1 then
 				scanTimer = 0
@@ -4167,27 +4241,40 @@ local function mouseTeleport()
 		return
 	end
 
-	-- stand on the surface instead of inside it
 	local lift = Vector3.new(0, hum.HipHeight + root.Size.Y / 2, 0)
 	local pos = result.Position + result.Normal * 2 + lift
 	root.CFrame = CFrame.new(pos) * (root.CFrame - root.CFrame.Position)
 	root.AssemblyLinearVelocity = Vector3.zero
 end
 
--- ===== RAGEBOT: stay behind / above / below (or orbit) the closest player =====
--- finds the closest living (damageable) player, then LOCKS ON: it keeps that same
--- player until they die, leave, or respawn, and only then picks a new closest one.
--- places your character RageDistance studs behind, above or below them (whichever
--- mode is selected), facing the same way they face. Behind is the fallback if no
--- mode is selected. With Orbit on, you circle them at RageDistance studs instead,
--- always facing them, at OrbitSpeed radians per second. runs after the Fly loop so
--- it takes priority over fly movement.
 local rageTarget = nil
 local rageShown = nil
 local rageAngle = 0
 
 local function getRageTarget(myRoot)
-	-- keep the current target until they die, leave, or respawn
+
+	if Settings.RageMode == "Selected" then
+		local query = string.lower(Settings.RageTarget or "")
+		if query == "" then return nil, "pick a player" end
+		local pick
+		for _, plr in ipairs(Players:GetPlayers()) do
+			if plr ~= LocalPlayer then
+				local n, d = string.lower(plr.Name), string.lower(plr.DisplayName)
+				if n == query or d == query then
+					pick = plr
+					break
+				elseif not pick and (string.find(n, query, 1, true) or string.find(d, query, 1, true)) then
+					pick = plr
+				end
+			end
+		end
+		if not pick then return nil, "not in server" end
+		local char = pick.Character
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if not (root and isAlive(char)) then return nil, pick.Name .. " (dead)" end
+		return { root = root, name = pick.Name, plr = pick }
+	end
+
 	if rageTarget and rageTarget.plr and rageTarget.plr.Parent == Players then
 		local char = rageTarget.plr.Character
 		local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -4196,7 +4283,6 @@ local function getRageTarget(myRoot)
 		end
 	end
 
-	-- otherwise pick the closest damageable player
 	local best, bestDist
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr ~= LocalPlayer then
@@ -4232,9 +4318,10 @@ track(RunService.Stepped:Connect(function(_, dt)
 	local myRoot = char and char:FindFirstChild("HumanoidRootPart")
 	if not (hum and myRoot and hum.Health > 0) then return end
 
-	rageTarget = getRageTarget(myRoot)
+	local why
+	rageTarget, why = getRageTarget(myRoot)
 	if not rageTarget then
-		setRageStatus("Target: none found")
+		setRageStatus("Target: " .. (why or "none found"))
 		return
 	end
 	setRageStatus("Target: " .. rageTarget.name)
@@ -4242,7 +4329,6 @@ track(RunService.Stepped:Connect(function(_, dt)
 	local targetPos = rageTarget.root.Position
 	local dist = Settings.RageDistance
 
-	-- ORBIT: circle around the target, always facing them
 	if Settings.RageOrbit then
 		rageAngle = (rageAngle + dt * Settings.OrbitSpeed) % (math.pi * 2)
 		local height = 0
@@ -4269,25 +4355,15 @@ track(RunService.Stepped:Connect(function(_, dt)
 	elseif Settings.RageBelow then
 		pos = targetPos - Vector3.new(0, dist, 0)
 	else
-		-- Behind (also the fallback if no mode is selected)
+
 		pos = targetPos - flat * dist
 	end
 
-	-- face the same way the target faces
 	myRoot.CFrame = CFrame.lookAt(pos, pos + flat)
 	myRoot.AssemblyLinearVelocity = Vector3.zero
 	myRoot.AssemblyAngularVelocity = Vector3.zero
 end))
 
--- ===== VORTEX (client / executor mode) =====
--- Used when the server half of this file is NOT running in the game.
--- Instead of just disabling the joints (which never replicates), this DESTROYS your character's
--- Motor6D joints. You own your character's physics, so once the joints are gone the loose parts
--- are simulated by YOU and the server relays their positions to everyone. We re-claim ownership
--- with the executor functions below (each is optional and wrapped in pcall):
---   sethiddenproperty(LocalPlayer, "SimulationRadius", math.huge)
---   setsimulationradius(math.huge, math.huge)
--- Turning the vortex off rebuilds the joints. Animations can look stuck until you move / jump.
 local vortexRestoreAll, vortexRemote
 do
 local vstate = nil
@@ -4325,15 +4401,13 @@ local function placeAll(st, ease)
 			local cf = r
 			if not j.head then
 				local sl = j.slot
-				-- spread the parts over a sphere (golden-angle spiral), then tumble the whole sphere
-				-- so parts swing above and below you as well as around you
+
 				local k = (sl - 0.5) / count
 				local phi = math.acos(1 - 2 * k)
 				local theta = sl * 2.399963
 				local dir = Vector3.new(math.sin(phi) * math.cos(theta), math.cos(phi), math.sin(phi) * math.sin(theta))
 				local tilt = CFrame.Angles(spin * 0.6, spin, spin * 0.35)
-				-- each part breathes in and out on its own rhythm: from the very centre (0) out to the full
-				-- radius and back, so parts pass through the middle instead of sitting on a shell
+
 				local rad = st.radius * (0.5 + 0.5 * math.sin(t * st.speed * (0.12 + (sl % 4) * 0.035) + sl * 1.7))
 				local pos = center + tilt:VectorToWorldSpace(dir) * rad
 				local orbit = CFrame.new(pos) * CFrame.Angles(t * 2 + sl, t * 1.3 + sl * 0.6, t * 1.7)
@@ -4346,7 +4420,6 @@ local function placeAll(st, ease)
 	end
 end
 
--- skipRebuild = true when the character is already gone (respawn / death)
 local function vortexRestore(skipRebuild)
 	local st = vstate
 	if not st then return end
@@ -4393,8 +4466,7 @@ local function vortexBuild(char, hum, root)
 
 	local motors = {}
 	for _, m in ipairs(char:GetDescendants()) do
-		-- the Neck joint is left alone: the server kills any character that loses it, and an
-		-- executor cannot turn that rule off. The head simply stays attached to the torso.
+
 		if m:IsA("Motor6D") and m.Name ~= "Neck" and m.Part0 and m.Part1 and m.Part1:IsDescendantOf(char) then
 			motors[#motors + 1] = m
 		end
@@ -4420,14 +4492,13 @@ local function vortexBuild(char, hum, root)
 	end
 	st.orbitCount = slot
 
-	-- the neck is about to be destroyed: don't let the humanoid die from it
 	hum.RequiresNeck = false
 	claimNetwork()
 	for _, j in ipairs(st.joints) do
 		pcall(function() j.motor:Destroy() end)
 		j.part.CanCollide = false
 	end
-	-- the camera normally follows the head, which now rides on the orbiting torso
+
 	pcall(function()
 		st.cam = workspace.CurrentCamera
 		st.cam.CameraSubject = root
@@ -4435,7 +4506,6 @@ local function vortexBuild(char, hum, root)
 	return st
 end
 
--- placed before physics (Stepped) and again after it (Heartbeat)
 track(RunService.Stepped:Connect(function()
 	local st = vstate
 	if st and st.root.Parent then placeAll(st, st.blend * st.blend * (3 - 2 * st.blend)) end
@@ -4458,7 +4528,6 @@ task.spawn(function()
 end)
 local vortexSent = { want = false, speed = nil, radius = nil, at = 0 }
 
--- tells the server half (if it exists) about the vortex
 local function sendVortex()
 	if not vortexRemote then return end
 	local want = (not VORTEX_DISABLED and alive and Settings.FlyVortex) and true or false
@@ -4475,7 +4544,7 @@ end
 local vortexLastError
 local function vortexFrame(dt)
 	local serverSide = game:GetService("ReplicatedStorage"):GetAttribute("OULVortexServerSide") == true
-	-- when the server half is running IT does the vortex; drawing it here too would fight it
+
 	local want = (not VORTEX_DISABLED) and (not serverSide) and alive and Settings.FlyVortex
 
 	local char = LocalPlayer.Character
@@ -4541,17 +4610,13 @@ track(RunService.RenderStepped:Connect(function(dt)
 end))
 end
 
--- ===== PANIC =====
--- hides every bit of UI instantly, then runs the normal unload (turns off all
--- features, restores speed / noclip / fly / mouse, removes ESP, stops saving).
--- it does NOT write the "everything off" state to your save file.
 local function panicNow()
 	pcall(function() gui.Enabled = false end)
 	pcall(function() blur.Size = 0 end)
 	local fn = shared.OULCleanup
 	shared.OULCleanup = nil
 	if fn then pcall(fn) end
-	-- fallbacks in case any part of the unload failed
+
 	pcall(function() gui:Destroy() end)
 	pcall(function() blur:Destroy() end)
 	pcall(function() espFolder:Destroy() end)
@@ -4606,7 +4671,6 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 		return
 	end
 
-	-- PANIC works even while typing in a text box or with the menu open
 	local panicBind = getBind("panic")
 	if panicBind and panicBind.input and inputMatches(input, panicBind.input) then
 		panicNow()
@@ -4637,7 +4701,7 @@ local aimEndedAt = 0
 local savedCFrame = nil
 
 local aiming = false
-local lockedPart = nil -- the part we are locked onto while the aim key is held
+local lockedPart = nil
 
 track(UserInputService.InputEnded:Connect(function(input)
 	if inputMatches(input, getBind("aim").input) then
@@ -4676,16 +4740,10 @@ RunService:BindToRenderStep("Aimbot", Enum.RenderPriority.Camera.Value + 1, func
 	local mouseLocked = UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
 	aiming = Settings.Enabled and Settings.Holding and mouseLocked and not menuOpen
 	if not aiming then
-		lockedPart = nil -- released (or aimbot off): the next hold picks a fresh target
+		lockedPart = nil
 		return
 	end
 
-	-- lock on when the aim key goes down and stay on that target (no switching to whoever is
-	-- closer), but DROP the lock the moment the target is no longer a valid thing to aim at:
-	--   * they died or left
-	--   * they went off screen
-	--   * they are behind a wall (the wall check setting)
-	-- after a drop it picks the closest visible player inside the FOV circle again, if any
 	if lockedPart then
 		local model = lockedPart:FindFirstAncestorOfClass("Model")
 		local valid = lockedPart.Parent ~= nil and model ~= nil and isAlive(model)
