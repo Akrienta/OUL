@@ -1,11 +1,10 @@
-# OUL Roblox Hacks
-Universal hacks for [Robloc](https://roblox.com)
+# OUL Roblox Exploits
+Universal Cheat Script For Roblox
 
-## What can it do
-OUL can do many things. Some include:
-- 
-- 
-- 
+Features:
+- Aimbot
+- Ragebot
+- VortexCharacterManipulation (Buggy)
 - 
 - 
 - 
