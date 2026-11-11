@@ -4,7 +4,7 @@ Universal Cheat Script For Roblox
 Features:
 - Aimbot
 - Ragebot
-- VortexCharacterManipulation (Buggy)
+- VortexCharacterManipulation (Buggy/ Experimental)
 - Fly
 - Noclip
 - Infinite Jump
@@ -12,4 +12,4 @@ Features:
 - TriggerBot
 - SilentAim (Soon)(Rivals*)
 - AntiKatana (Soon)(Rivals*)
-- 
+- Radar (Idk Why...)
