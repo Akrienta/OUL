@@ -1,4 +1,4 @@
--- OUL --
+--OUL--
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -390,7 +390,9 @@ local Settings = {
 	FOV = 150,
 	IgnoreFOV = false,
 	TeamCheck = true,
-	Smoothness = 1,
+	Strength = 500,
+	Prediction = false,
+	PredictionMs = 100,
 	Triggerbot = false,
 	TriggerDelay = 50,
 	TriggerOnClick = false,
@@ -411,6 +413,16 @@ local Settings = {
 	ShowFOV = true,
 	AimPart = "Head",
 	AimMode = "Hold",
+	Fullbright = false,
+	NoFog = false,
+	Radar = false,
+	RadarRange = 250,
+	RadarSize = 160,
+	RadarCorner = "TopRight",
+	RadarX = -1,
+	RadarY = -1,
+	RadarDotSize = 7,
+	RadarLineThickness = 1,
 	UITransparency = 0,
 	Fly = false,
 	FlySpeed = 60,
@@ -452,6 +464,7 @@ local DisplayNames = {
 	TargetNPCs = "Target Zombies/NPCS", ESPNPCs = "Zombie/NPC ESP",
 	MouseTP = "Mouse TP", KeybindList = "Keybind List",
 	Ragebot = "Ragebot", RageOrbit = "Orbit",
+	Fullbright = "Fullbright", NoFog = "No Fog", Radar = "Radar",
 }
 
 local Binds = {}
@@ -548,6 +561,8 @@ local ESPColors = {
 	BoxFill = Color3.fromRGB(255, 70, 70),
 	Skeleton = Color3.fromRGB(255, 255, 255),
 	Sky = Color3.fromRGB(90, 140, 255),
+	Radar = Color3.fromRGB(255, 70, 70),
+	RadarLines = Color3.fromRGB(255, 255, 255),
 }
 
 local FOVColor = Color3.fromRGB(255, 255, 255)
@@ -579,6 +594,8 @@ local ConfigAPI = {
 		["Box Fill"] = function() return ESPColors.BoxFill end,
 		["Skeleton"] = function() return ESPColors.Skeleton end,
 		["Sky Colour"] = function() return ESPColors.Sky end,
+		["Radar"] = function() return ESPColors.Radar end,
+		["Radar Lines"] = function() return ESPColors.RadarLines end,
 		["Tracers"] = function() return ESPColors.Tracer end,
 		["Usernames"] = function() return ESPColors.Name end,
 		["Checkbox"] = function() return Theme.Switch end,
@@ -597,18 +614,24 @@ local SAVE_VERSION = 2
 
 local SAVE_BOOLS = {
 	"Enabled", "IgnoreFOV", "TeamCheck", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
-	"Boxes", "BoxFill", "Skeleton", "ESPHealth", "Skybox", "SkyRainbow", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed",
+	"Boxes", "BoxFill", "Skeleton", "ESPHealth", "Skybox", "SkyRainbow", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed", "Fullbright", "NoFog", "Radar", "Prediction",
 	"InfiniteJump", "Notifications", "TargetNPCs", "ESPNPCs", "MouseTP", "KeybindList", "Ragebot",
 	"RageBehind", "RageAbove", "RageBelow", "RageOrbit",
 }
 local SAVE_NUMBERS = {
-	FOV = { 20, 500 }, Smoothness = { 1, 100 }, TriggerDelay = { 0, 300 },
+	RadarRange = { 50, 1000 },
+	RadarSize = { 100, 300 },
+	RadarDotSize = { 4, 14 },
+	RadarX = { -1, 10000 },
+	RadarY = { -1, 10000 },
+	RadarLineThickness = { 1, 4 },
+	FOV = { 20, 500 }, Strength = { 1, 500 }, PredictionMs = { 0, 500 }, TriggerDelay = { 0, 300 },
 	BlurAmount = { 1, 56 }, UITransparency = { 0, 70 }, FlySpeed = { 5, 1000 },
 	VortexSpeed = { 1, 100 }, VortexRadius = { 2, 60 }, SpeedValue = { 16, 250 },
 	RageDistance = { 2, 20 }, OrbitSpeed = { 1, 30 },
 }
 local SAVE_THEME = { "Text", "Switch", "Accent", "Background", "Outline" }
-local SAVE_ESP = { "Fill", "Outline", "Tracer", "Name", "Box", "BoxFill", "Skeleton", "Sky" }
+local SAVE_ESP = { "Fill", "Outline", "Tracer", "Name", "Box", "BoxFill", "Skeleton", "Sky", "Radar", "RadarLines" }
 
 local function colorToArr(c)
 	return { math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5) }
@@ -677,6 +700,10 @@ local function applySaved(d)
 	end
 	if s.AimPart == "Head" or s.AimPart == "Body" then Settings.AimPart = s.AimPart end
 	if s.AimMode == "Hold" or s.AimMode == "Toggle" then Settings.AimMode = s.AimMode end
+	if type(s.RadarCorner) == "string" then
+		local corners = { TopRight = true, TopLeft = true, BottomRight = true, BottomLeft = true, Custom = true }
+		if corners[s.RadarCorner] then Settings.RadarCorner = s.RadarCorner end
+	end
 	if s.RageMode == "Closest" or s.RageMode == "Selected" then Settings.RageMode = s.RageMode end
 	if type(s.RageTarget) == "string" then Settings.RageTarget = s.RageTarget:sub(1, 24) end
 
@@ -1001,6 +1028,359 @@ end
 local espFolder = Instance.new("Folder")
 espFolder.Name = "OULESP"
 espFolder.Parent = workspace
+
+local applyWorldLighting
+do
+local savedLighting = nil
+applyWorldLighting = function()
+	if Settings.Fullbright or Settings.NoFog then
+		if not savedLighting then
+			savedLighting = {
+				Brightness = Lighting.Brightness,
+				ClockTime = Lighting.ClockTime,
+				GlobalShadows = Lighting.GlobalShadows,
+				OutdoorAmbient = Lighting.OutdoorAmbient,
+				Ambient = Lighting.Ambient,
+				FogStart = Lighting.FogStart,
+				FogEnd = Lighting.FogEnd,
+			}
+		end
+	end
+
+	if Settings.Fullbright then
+		Lighting.Brightness = 2
+		Lighting.ClockTime = 14
+		Lighting.GlobalShadows = false
+		Lighting.OutdoorAmbient = Color3.fromRGB(200, 200, 200)
+		Lighting.Ambient = Color3.fromRGB(200, 200, 200)
+	elseif savedLighting then
+		Lighting.Brightness = savedLighting.Brightness
+		Lighting.ClockTime = savedLighting.ClockTime
+		Lighting.GlobalShadows = savedLighting.GlobalShadows
+		Lighting.OutdoorAmbient = savedLighting.OutdoorAmbient
+		Lighting.Ambient = savedLighting.Ambient
+	end
+
+	if Settings.NoFog then
+		Lighting.FogStart = 100000
+		Lighting.FogEnd = 100000
+		for _, c in ipairs(Lighting:GetChildren()) do
+			if c:IsA("Atmosphere") then
+				if c:GetAttribute("OULOrigDensity") == nil then
+					c:SetAttribute("OULOrigDensity", c.Density)
+				end
+				c.Density = 0
+			end
+		end
+	elseif savedLighting then
+		Lighting.FogStart = savedLighting.FogStart
+		Lighting.FogEnd = savedLighting.FogEnd
+		for _, c in ipairs(Lighting:GetChildren()) do
+			if c:IsA("Atmosphere") then
+				c.Density = c:GetAttribute("OULOrigDensity") or c.Density
+			end
+		end
+	end
+
+	if not Settings.Fullbright and not Settings.NoFog then
+		savedLighting = nil
+	end
+end
+
+track(RunService.Heartbeat:Connect(function()
+	if (Settings.Fullbright or Settings.NoFog) and savedLighting then
+		applyWorldLighting()
+	end
+end))
+end
+
+do
+	local radarGui = Instance.new("Frame")
+	radarGui.Name = "OULRadar"
+	radarGui.BackgroundTransparency = 1
+	radarGui.AnchorPoint = Vector2.new(0.5, 0.5)
+	radarGui.Size = UDim2.fromOffset(Settings.RadarSize, Settings.RadarSize)
+	radarGui.Visible = false
+	radarGui.ZIndex = 90
+	radarGui.Parent = gui
+
+	local useDrawing = false
+	pcall(function()
+		if Drawing and Drawing.new then
+			local t = Drawing.new("Circle")
+			t.Visible = false
+			t:Remove()
+			useDrawing = true
+		end
+	end)
+	ConfigAPI.radarMode = useDrawing and "Drawing" or "GUI"
+
+	local BLACK = Color3.fromRGB(0, 0, 0)
+	local RING_FRACS = { 1, 2 / 3, 1 / 3 }
+	local MARGIN, TOP_MARGIN = 16, 50
+
+	local function radarCentre(r)
+		local vp = workspace.CurrentCamera.ViewportSize
+		local corner = Settings.RadarCorner
+		if corner == "Custom" then
+			if Settings.RadarX < 0 or Settings.RadarY < 0 then
+				Settings.RadarX = vp.X - MARGIN - r
+				Settings.RadarY = TOP_MARGIN + r
+			end
+			return math.clamp(Settings.RadarX, r, vp.X - r), math.clamp(Settings.RadarY, r, vp.Y - r)
+		end
+		local cx = (corner == "TopLeft" or corner == "BottomLeft") and (MARGIN + r) or (vp.X - MARGIN - r)
+		local cy = (corner == "TopLeft" or corner == "TopRight") and (TOP_MARGIN + r) or (vp.Y - MARGIN - r)
+		return cx, cy
+	end
+
+	local dObjs = {}
+	local function newD(kind)
+		local o = Drawing.new(kind)
+		o.Visible = false
+		dObjs[#dObjs + 1] = o
+		return o
+	end
+
+	local dRings, dLines, dCenter = {}, {}, nil
+	if useDrawing then
+		for _ = 1, #RING_FRACS do
+			local back, front = newD("Circle"), newD("Circle")
+			for _, c in ipairs({ back, front }) do
+				c.NumSides = 64
+				c.Filled = false
+			end
+			back.Color, back.Transparency = BLACK, 0.45
+			front.Transparency = 1
+			dRings[#dRings + 1] = { back, front }
+		end
+		for _ = 1, 2 do
+			local back, front = newD("Line"), newD("Line")
+			back.Color, back.Transparency = BLACK, 0.45
+			front.Transparency = 0.8
+			dLines[#dLines + 1] = { back, front }
+		end
+		dCenter = newD("Circle")
+		dCenter.Filled = true
+		dCenter.Radius = 3
+		dCenter.NumSides = 16
+		dCenter.Transparency = 1
+	end
+
+	local gRings, gLines, gCentre = {}, {}, nil
+	for _, frac in ipairs(RING_FRACS) do
+		local ring = Instance.new("Frame")
+		ring.AnchorPoint = Vector2.new(0.5, 0.5)
+		ring.Position = UDim2.fromScale(0.5, 0.5)
+		ring.Size = UDim2.fromScale(frac, frac)
+		ring.BackgroundTransparency = 1
+		ring.ZIndex = 90
+		ring.Parent = radarGui
+		Instance.new("UICorner", ring).CornerRadius = UDim.new(1, 0)
+		local st = Instance.new("UIStroke")
+		st.Transparency = 0.1
+		st.Parent = ring
+		gRings[#gRings + 1] = st
+	end
+	for i = 1, 2 do
+		local line = Instance.new("Frame")
+		line.AnchorPoint = Vector2.new(0.5, 0.5)
+		line.Position = UDim2.fromScale(0.5, 0.5)
+		line.Size = (i == 1) and UDim2.new(1, 0, 0, 1) or UDim2.new(0, 1, 1, 0)
+		line.BackgroundTransparency = 0.3
+		line.BorderSizePixel = 0
+		line.ZIndex = 90
+		line.Parent = radarGui
+		gLines[#gLines + 1] = line
+	end
+	do
+		local centre = Instance.new("Frame")
+		centre.AnchorPoint = Vector2.new(0.5, 0.5)
+		centre.Position = UDim2.fromScale(0.5, 0.5)
+		centre.Size = UDim2.fromOffset(6, 6)
+		centre.BorderSizePixel = 0
+		centre.ZIndex = 91
+		centre.Parent = radarGui
+		Instance.new("UICorner", centre).CornerRadius = UDim.new(1, 0)
+		gCentre = centre
+	end
+
+	local dots = {}
+	local dragging, dragOffset = false, Vector2.zero
+
+	track(UserInputService.InputBegan:Connect(function(input)
+		if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+		if not (Settings.Radar and Settings.RadarCorner == "Custom") then return end
+		if UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter then return end
+		local r = Settings.RadarSize / 2
+		local cx, cy = radarCentre(r)
+		local m = UserInputService:GetMouseLocation()
+		if (m - Vector2.new(cx, cy)).Magnitude <= r then
+			dragging = true
+			dragOffset = Vector2.new(cx, cy) - m
+		end
+	end))
+
+	local function dropDot(key)
+		local d = dots[key]
+		if d then
+			pcall(function()
+				if useDrawing then d:Remove() else d:Destroy() end
+			end)
+			if useDrawing then
+				for i, o in ipairs(dObjs) do
+					if o == d then
+						table.remove(dObjs, i)
+						break
+					end
+				end
+			end
+			dots[key] = nil
+		end
+	end
+
+	local function hideDrawing()
+		for _, o in ipairs(dObjs) do
+			pcall(function() o.Visible = false end)
+		end
+	end
+
+	track(RunService.RenderStepped:Connect(function()
+		if not Settings.Radar then
+			dragging = false
+			radarGui.Visible = false
+			if useDrawing then hideDrawing() end
+			for key in pairs(dots) do dropDot(key) end
+			return
+		end
+
+		local size = Settings.RadarSize
+		local r = size / 2
+		if dragging then
+			if Settings.RadarCorner == "Custom" and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+				local m = UserInputService:GetMouseLocation() + dragOffset
+				Settings.RadarX, Settings.RadarY = m.X, m.Y
+			else
+				dragging = false
+			end
+		end
+		local cx, cy = radarCentre(r)
+		local range = Settings.RadarRange
+		local lineColor = ESPColors.RadarLines
+		local lineThick = Settings.RadarLineThickness
+		local dotSize = Settings.RadarDotSize
+
+		if useDrawing then
+			radarGui.Visible = false
+			for i, frac in ipairs(RING_FRACS) do
+				local back, front = dRings[i][1], dRings[i][2]
+				back.Position, front.Position = Vector2.new(cx, cy), Vector2.new(cx, cy)
+				back.Radius, front.Radius = r * frac, r * frac
+				back.Thickness = lineThick + 2
+				front.Thickness = lineThick
+				front.Color = lineColor
+				back.Visible, front.Visible = true, true
+			end
+			for i, l in ipairs(dLines) do
+				local from, to
+				if i == 1 then
+					from, to = Vector2.new(cx - r, cy), Vector2.new(cx + r, cy)
+				else
+					from, to = Vector2.new(cx, cy - r), Vector2.new(cx, cy + r)
+				end
+				local back, front = l[1], l[2]
+				back.From, back.To = from, to
+				front.From, front.To = from, to
+				back.Thickness = lineThick + 2
+				front.Thickness = lineThick
+				front.Color = lineColor
+				back.Visible, front.Visible = true, true
+			end
+			dCenter.Position = Vector2.new(cx, cy)
+			dCenter.Color = lineColor
+			dCenter.Visible = true
+		else
+			radarGui.Size = UDim2.fromOffset(size, size)
+			radarGui.Position = UDim2.fromOffset(cx, cy)
+			radarGui.Visible = true
+			for _, st in ipairs(gRings) do
+				st.Color = lineColor
+				st.Thickness = lineThick
+			end
+			for _, line in ipairs(gLines) do
+				line.BackgroundColor3 = lineColor
+			end
+			gCentre.BackgroundColor3 = lineColor
+		end
+
+		local myChar = LocalPlayer.Character
+		local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+		if not myRoot then
+			for key in pairs(dots) do dropDot(key) end
+			return
+		end
+
+		local cam = workspace.CurrentCamera
+		local look = cam.CFrame.LookVector
+		local flatLook = Vector3.new(look.X, 0, look.Z)
+		if flatLook.Magnitude < 0.001 then flatLook = Vector3.new(0, 0, -1) end
+		local base = CFrame.lookAt(Vector3.zero, flatLook)
+
+		local live = {}
+		for _, ent in ipairs(espEntities()) do
+			local key, char = ent[1], ent[2]
+			local root = char and char:FindFirstChild("HumanoidRootPart")
+			if root then
+				live[key] = true
+				local delta = root.Position - myRoot.Position
+				local rel = base:VectorToObjectSpace(Vector3.new(delta.X, 0, delta.Z))
+				local v = Vector2.new(rel.X, rel.Z) / range
+				if v.Magnitude > 1 then v = v.Unit end
+
+				local d = dots[key]
+				if useDrawing then
+					if not d then
+						d = newD("Circle")
+						d.Filled = true
+						d.NumSides = 16
+						d.Transparency = 1
+						dots[key] = d
+					end
+					d.Color = ESPColors.Radar
+					d.Radius = dotSize / 2
+					d.Position = Vector2.new(cx, cy) + v * r
+					d.Visible = true
+				else
+					if not d then
+						d = Instance.new("Frame")
+						d.AnchorPoint = Vector2.new(0.5, 0.5)
+						d.BorderSizePixel = 0
+						d.ZIndex = 92
+						d.Parent = radarGui
+						Instance.new("UICorner", d).CornerRadius = UDim.new(1, 0)
+						dots[key] = d
+					end
+					d.Size = UDim2.fromOffset(dotSize, dotSize)
+					d.BackgroundColor3 = ESPColors.Radar
+					d.Position = UDim2.fromOffset(r + v.X * r, r + v.Y * r)
+				end
+			end
+		end
+
+		for key in pairs(dots) do
+			if not live[key] then dropDot(key) end
+		end
+	end))
+
+	ConfigAPI.radarCleanup = function()
+		for _, o in ipairs(dObjs) do
+			pcall(function() o:Remove() end)
+		end
+		dObjs = {}
+		dots = {}
+	end
+end
+
 local highlights = {}
 local nameTags = {}
 
@@ -1329,7 +1709,7 @@ local SUBTABS = {
 		{ id = "antikatana", label = "Antikatana" },
 		{ id = "ragebot", label = "Ragebot" },
 	},
-	visuals = { { id = "esp", label = "ESP" }, { id = "colours", label = "Colours" }, { id = "sky", label = "Sky" } },
+	visuals = { { id = "esp", label = "ESP" }, { id = "colours", label = "Colours" }, { id = "sky", label = "Sky" }, { id = "radar", label = "Radar" }, { id = "world", label = "World" } },
 	settings = { { id = "general", label = "General" }, { id = "keybinds", label = "Keybinds" }, { id = "configs", label = "Configs" } },
 	movement = { { id = "fly", label = "Fly" }, { id = "vortex", label = "Vortex" }, { id = "noclip", label = "Noclip" }, { id = "speed", label = "Speed" }, { id = "jump", label = "Jump" }, { id = "mousetp", label = "Mouse TP" } },
 }
@@ -2566,7 +2946,9 @@ do
 	addSlider(g, "FOV", 20, 500, "FOV", function(v)
 		circle.Size = UDim2.fromOffset(v * 2, v * 2)
 	end)
-	addSlider(g, "Smoothness", 1, 100, "Smoothness")
+	addSlider(g, "Strength", 1, 500, "Strength")
+	addCheckbox(g, "Prediction", "Prediction")
+	addSlider(g, "Prediction (ms)", 0, 500, "PredictionMs")
 	addSegment(g, "Target", "AimPart", "Head", "Body")
 	addSegment(g, "Key mode", "AimMode", "Hold", "Toggle", function()
 		Settings.Holding = false
@@ -2590,6 +2972,10 @@ do
 	end)
 	addNote(info, "range: 1000 studs")
 	addNote(info, "needs mouse lock")
+	addNote(info, "strength: 1 = soft pull,")
+	addNote(info, "500 = straight lock")
+	addNote(info, "prediction leads moving")
+	addNote(info, "targets by their speed")
 	addButton(info, "Print team info", Color3.fromRGB(70, 90, 140), Color3.fromRGB(90, 112, 170), function()
 		if printTeamInfo then printTeamInfo() end
 	end)
@@ -2819,6 +3205,90 @@ do
 end
 
 do
+	local radarPage = newPage("visuals_radar", true)
+	local g = newGroup(radarPage, 1, "Radar")
+	addCheckbox(g, "Enabled", "Radar", function(on)
+		if on and toast then toast("Radar  -  " .. tostring(ConfigAPI.radarMode) .. " mode") end
+	end)
+	addSlider(g, "Range (studs)", 50, 1000, "RadarRange")
+	addSlider(g, "Size", 100, 300, "RadarSize")
+	addSlider(g, "Dot Size", 4, 14, "RadarDotSize")
+	addSlider(g, "Line Thickness", 1, 4, "RadarLineThickness")
+
+	local pos = newGroup(radarPage, 1, "Position")
+	do
+		local grid = Instance.new("Frame")
+		grid.Size = UDim2.new(1, 0, 0, 106)
+		grid.BackgroundTransparency = 1
+		grid.LayoutOrder = nextOrder(pos)
+		grid.Parent = pos
+		local gl = Instance.new("UIGridLayout")
+		gl.CellSize = UDim2.new(0.5, -3, 0, 30)
+		gl.CellPadding = UDim2.fromOffset(6, 6)
+		gl.SortOrder = Enum.SortOrder.LayoutOrder
+		gl.Parent = grid
+
+		local buttons = {}
+		local corners = {
+			{ id = "TopLeft", label = "Top Left", order = 1 },
+			{ id = "TopRight", label = "Top Right", order = 2 },
+			{ id = "BottomLeft", label = "Bottom Left", order = 3 },
+			{ id = "BottomRight", label = "Bottom Right", order = 4 },
+			{ id = "Custom", label = "Custom (drag)", order = 5 },
+		}
+		local function refresh(animate)
+			for id, btn in pairs(buttons) do
+				apply(btn, {
+					BackgroundTransparency = (Settings.RadarCorner == id) and 0 or 1,
+					TextColor3 = (Settings.RadarCorner == id) and Color3.fromRGB(255, 255, 255) or Theme.Dim,
+				}, animate)
+			end
+		end
+		for _, c in ipairs(corners) do
+			local btn = Instance.new("TextButton")
+			btn.LayoutOrder = c.order
+			btn.BorderSizePixel = 0
+			btn.AutoButtonColor = false
+			btn.Font = FONT
+			btn.TextSize = 12
+			btn.Text = c.label
+			btn.Parent = grid
+			bind(btn, "BackgroundColor3", function() return Theme.Accent end)
+			corner(btn, 3)
+			outline(btn, 0.4)
+			buttons[c.id] = btn
+			btn.MouseButton1Click:Connect(function()
+				Settings.RadarCorner = c.id
+				refresh(true)
+			end)
+		end
+		onTheme(function() refresh(true) end)
+		refreshers.RadarCorner = refresh
+		refresh(false)
+	end
+	addNote(pos, "Custom: open the menu, then")
+	addNote(pos, "left click + drag the radar")
+
+	local colg = newGroup(radarPage, 2, "Colours")
+	addColor(colg, "Radar", paletteWith(ESPColors.Radar), function(color)
+		ESPColors.Radar = color
+	end, ESPColors.Radar)
+	addColor(colg, "Radar Lines", paletteWith(ESPColors.RadarLines), function(color)
+		ESPColors.RadarLines = color
+	end, ESPColors.RadarLines)
+
+	local info = newGroup(radarPage, 2, "Info")
+	addNote(info, "rings + crosshair only,")
+	addNote(info, "no background: stays out")
+	addNote(info, "of the way of your screen")
+	addNote(info, "dots = other players")
+	addNote(info, "range = edge of the rings")
+	addHint(addNote(info, ""), function()
+		return "mode: " .. tostring(ConfigAPI.radarMode)
+	end)
+end
+
+do
 	local skyPage = newPage("visuals_sky", true)
 	local g = newGroup(skyPage, 1, "Skybox")
 	addCheckbox(g, "Enabled", "Skybox")
@@ -2833,6 +3303,25 @@ do
 	addNote(info, "and haze (put back when off)")
 	addNote(info, "rainbow cycles colours")
 	addNote(info, "needs writefile support")
+end
+
+do
+	local worldPage = newPage("visuals_world", true)
+	local g = newGroup(worldPage, 1, "World")
+	addCheckbox(g, "Fullbright", "Fullbright", function()
+		applyWorldLighting()
+	end)
+	addCheckbox(g, "No Fog", "NoFog", function()
+		applyWorldLighting()
+	end)
+
+	local info = newGroup(worldPage, 2, "Info")
+	addNote(info, "fullbright: max brightness,")
+	addNote(info, "no shadows, flat lighting")
+	addNote(info, "no fog: removes distance fog")
+	addNote(info, "and atmosphere haze")
+	addNote(info, "original lighting restored")
+	addNote(info, "when turned off / unloaded")
 end
 
 do
@@ -4976,10 +5465,19 @@ RunService:BindToRenderStep("Aimbot", Enum.RenderPriority.Camera.Value + 1, func
 	end
 	local target = lockedPart
 
-	local s = math.clamp(Settings.Smoothness / 100, 0, 0.98)
-	local alpha = 1 - s ^ (dt * 60)
+	local alpha = (Settings.Strength >= 500) and 1 or (1 - math.exp(-Settings.Strength * dt))
 
-	local goal = CFrame.lookAt(Camera.CFrame.Position, target.Position)
+	local aimPos = target.Position
+	if Settings.Prediction then
+		local tm = target:FindFirstAncestorOfClass("Model")
+		local troot = tm and tm:FindFirstChild("HumanoidRootPart")
+		if troot then
+			local v = troot.AssemblyLinearVelocity
+			aimPos = aimPos + Vector3.new(v.X, 0, v.Z) * (Settings.PredictionMs / 1000)
+		end
+	end
+
+	local goal = CFrame.lookAt(Camera.CFrame.Position, aimPos)
 	Camera.CFrame = Camera.CFrame:Lerp(goal, alpha)
 end)
 
@@ -4988,6 +5486,9 @@ local function cleanup()
 
 	Settings.Enabled = false
 	Settings.Holding = false
+	Settings.Fullbright = false
+	Settings.NoFog = false
+	Settings.Radar = false
 	Settings.Triggerbot = false
 	Settings.Ragebot = false
 	Settings.RageOrbit = false
@@ -5008,6 +5509,10 @@ local function cleanup()
 	end)
 
 	pcall(noclipRestore)
+	pcall(applyWorldLighting)
+	pcall(function()
+		if ConfigAPI.radarCleanup then ConfigAPI.radarCleanup() end
+	end)
 	pcall(function()
 		if ConfigAPI.skyRestore then ConfigAPI.skyRestore(true) end
 	end)
