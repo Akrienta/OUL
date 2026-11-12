@@ -9,7 +9,7 @@ Combat ---
 - AntiKatana - (Soon)(Rivals*)
   
 Movement ---
-- Vortex - (Buggy/ Experimental - (Splits The Characters Root Parts Into An Orbit Around The Center Of Your Hitbox))
+- Vortex - (Buggy/ Experimental - (Splits The Characters Parts Into An Orbit Around The Center Of Your Hitbox))
 - Fly - (Up To 1000 Studs Per Second)
 - Noclip - (Allows Player To Phase Through Walls)
 - Infinite Jump - (This Is Self Explanatory)
