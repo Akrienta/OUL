@@ -27,3 +27,6 @@ Menu ---
 - Keybind Editor - (Lets The User Change Keybinds That Toggle Or Activate Selected Actions)
 - ShowKeybinds - (Shows A List Of The Keybinds Attached To Actions)
 - ShowWaterMark - (Shows The OUL Logo And The Clients FPS And Ping)
+
+## How to run?
+Use Vault.
