@@ -1,3 +1,7 @@
+--  /\    |  |    |    --
+-- /  \   |  |    |    --
+-- \  /   |  |    |    --
+--  \/    \__/    \___ --
 local iLloLioO=(getfenv and getfenv(1)) or _ENV or _G
 local L1IOOjiOL,jLOloL=string.byte,string.char
 local function liOL0LLI1(LoOo0Ll1lO0,L01l0L000I)
