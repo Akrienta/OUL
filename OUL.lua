@@ -207,6 +207,612 @@ end
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
+-- ============================ LOGO + LOADING SCREEN ============================
+-- One loading screen shared by the key gate and the main script load.
+-- Dark navy backdrop, the OUL logo in the middle that spins as progress climbs,
+-- "Loading" text and a percentage under it.
+local makeLogo
+do
+local LOGO_ID = ""
+local LOGO_FILE = "OUL_logo.png"
+local LOGO_PURPLE = Color3.fromRGB(145, 90, 255)
+local LOGO_BLUE = Color3.fromRGB(50, 145, 255)
+
+function makeLogo(parent, size, x, y, zIndex)
+	zIndex = zIndex or 101
+
+	local src
+	if LOGO_ID ~= "" then
+		src = "rbxassetid://" .. LOGO_ID
+	else
+		pcall(function()
+			if isfile and getcustomasset and isfile(LOGO_FILE) then
+				src = getcustomasset(LOGO_FILE)
+			end
+		end)
+	end
+
+	if src then
+		local img = Instance.new("ImageLabel")
+		img.Name = "OULLogo"
+		img.BackgroundTransparency = 1
+		img.BorderSizePixel = 0
+		img.Size = UDim2.fromOffset(size, size)
+		img.Position = UDim2.fromOffset(x, y)
+		img.ScaleType = Enum.ScaleType.Fit
+		img.Image = src
+		img.ZIndex = zIndex
+		img.Parent = parent
+
+		Instance.new("UICorner", img).CornerRadius = UDim.new(1, 0)
+		return img
+	end
+
+	local ring = Instance.new("Frame")
+	ring.Name = "OULLogo"
+	ring.BackgroundTransparency = 1
+	ring.BorderSizePixel = 0
+	ring.Size = UDim2.fromOffset(size, size)
+	ring.Position = UDim2.fromOffset(x, y)
+	ring.ZIndex = zIndex
+	ring.Parent = parent
+	Instance.new("UICorner", ring).CornerRadius = UDim.new(1, 0)
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(255, 255, 255)
+	stroke.Thickness = math.max(1.5, size / 10)
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	stroke.Parent = ring
+
+	local grad = Instance.new("UIGradient")
+	grad.Color = ColorSequence.new(LOGO_PURPLE, LOGO_BLUE)
+	grad.Rotation = 45
+	grad.Parent = stroke
+
+	local lbl = Instance.new("TextLabel")
+	lbl.BackgroundTransparency = 1
+	lbl.Size = UDim2.new(1, 0, 1, 0)
+	lbl.Text = "OUL"
+	lbl.Font = Enum.Font.GothamBold
+	lbl.TextSize = math.max(6, math.floor(size * 0.36))
+	lbl.TextColor3 = Color3.fromRGB(240, 242, 252)
+	lbl.ZIndex = zIndex
+	lbl.Parent = ring
+	return ring
+end
+end
+
+local Loader = { cur = nil }
+
+function Loader.create()
+	local DIM_AMOUNT = 0.45 -- 0 = no dimming, 1 = fully black
+	local BLUR_SIZE = 8 -- lower = sharper background
+	local TEXT = Color3.fromRGB(215, 228, 245)
+	local DIM = Color3.fromRGB(110, 150, 190)
+	local LFONT = Enum.Font.RobotoMono
+	local LOGO_SIZE = 110
+	local SPINS = 2 -- full turns of the logo between 0% and 100%
+
+	local g = Instance.new("ScreenGui")
+	g.Name = "OULLoaderUI"
+	g.ResetOnSpawn = false
+	g.IgnoreGuiInset = true
+	g.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	g.DisplayOrder = 1000001
+	pcall(function() g.OnTopOfCoreBlur = true end)
+
+	local parentOK = false
+	pcall(function()
+		local host = gethui and gethui() or game:GetService("CoreGui")
+		g.Parent = host
+		parentOK = (g.Parent == host)
+	end)
+	if not parentOK then
+		g.Parent = LocalPlayer:WaitForChild("PlayerGui")
+	end
+
+	local root = Instance.new("Frame")
+	root.Size = UDim2.fromScale(1, 1)
+	root.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	root.BackgroundTransparency = 1
+	root.BorderSizePixel = 0
+	root.Active = true
+	root.ZIndex = 10
+	root.Parent = g
+
+	-- blurs the game behind the loader (removed again when the loader goes away)
+	local blurFx = Instance.new("BlurEffect")
+	blurFx.Name = "OULLoaderBlur"
+	blurFx.Size = 0
+	blurFx.Parent = Lighting
+
+	-- frees the mouse and swallows clicks while loading
+	local modal = Instance.new("TextButton")
+	modal.Size = UDim2.fromOffset(0, 0)
+	modal.BackgroundTransparency = 1
+	modal.Text = ""
+	modal.Modal = true
+	modal.Parent = root
+
+	local content = Instance.new("Frame")
+	content.Size = UDim2.fromScale(1, 1)
+	content.BackgroundTransparency = 1
+	content.BorderSizePixel = 0
+	content.ZIndex = 11
+	content.Parent = root
+
+	local logo = makeLogo(content, LOGO_SIZE, 0, 0, 11)
+	logo.AnchorPoint = Vector2.new(0.5, 0.5)
+	logo.Position = UDim2.new(0.5, 0, 0.5, -22)
+
+	local title = Instance.new("TextLabel")
+	title.BackgroundTransparency = 1
+	title.AnchorPoint = Vector2.new(0.5, 0)
+	title.Position = UDim2.new(0.5, 0, 0.5, 40)
+	title.Size = UDim2.fromOffset(300, 20)
+	title.Font = LFONT
+	title.TextSize = 16
+	title.TextColor3 = TEXT
+	title.Text = "Loading"
+	title.ZIndex = 11
+	title.Parent = content
+
+	local status = Instance.new("TextLabel")
+	status.BackgroundTransparency = 1
+	status.AnchorPoint = Vector2.new(0.5, 0)
+	status.Position = UDim2.new(0.5, 0, 0.5, 62)
+	status.Size = UDim2.fromOffset(300, 16)
+	status.Font = LFONT
+	status.TextSize = 12
+	status.TextColor3 = DIM
+	status.Text = "0%"
+	status.ZIndex = 11
+	status.Parent = content
+
+	-- fading is done per element (no CanvasGroup) so the text and logo stay crisp
+	local fadeItems = {}
+	for _, d in ipairs(content:GetDescendants()) do
+		local prop
+		if d:IsA("ImageLabel") then prop = "ImageTransparency"
+		elseif d:IsA("TextLabel") then prop = "TextTransparency"
+		elseif d:IsA("UIStroke") then prop = "Transparency" end
+		if prop then
+			fadeItems[#fadeItems + 1] = { obj = d, prop = prop, base = d[prop] }
+			d[prop] = 1
+		end
+	end
+	local function fadeTo(visible, dur)
+		local info = TweenInfo.new(dur, Enum.EasingStyle.Quad, visible and Enum.EasingDirection.Out or Enum.EasingDirection.In)
+		TweenService:Create(root, info, { BackgroundTransparency = visible and DIM_AMOUNT or 1 }):Play()
+		TweenService:Create(blurFx, info, { Size = visible and BLUR_SIZE or 0 }):Play()
+		for _, it in ipairs(fadeItems) do
+			TweenService:Create(it.obj, info, { [it.prop] = visible and it.base or 1 }):Play()
+		end
+	end
+
+	local open = true
+	local shown, target, msg = 0, 0, ""
+	local lastActive = os.clock()
+	local L = {}
+
+	local function render()
+		logo.Rotation = shown * 360 * SPINS
+		local pct = math.floor(shown * 100 + 0.5)
+		status.Text = (msg ~= "") and (pct .. "%  -  " .. msg) or (pct .. "%")
+	end
+
+	local conn = RunService.RenderStepped:Connect(function(dt)
+		local diff = target - shown
+		if diff > 0 then
+			shown = math.min(target, shown + math.max(diff * 10, 0.5) * dt)
+		end
+		render()
+	end)
+
+	fadeTo(true, 0.25)
+
+	-- sets the target progress and waits a moment so the spin is actually seen
+	function L.set(p, text)
+		if not open then return end
+		lastActive = os.clock()
+		target = math.clamp(p, 0, 1)
+		if text then msg = text end
+		local t0 = os.clock()
+		while open and shown < target - 0.02 and os.clock() - t0 < 1.2 do
+			RunService.RenderStepped:Wait()
+		end
+	end
+
+	-- jump back to 0% (used when the key gate hands over to the main load)
+	function L.reset(text)
+		if not open then return end
+		lastActive = os.clock()
+		shown, target = 0, 0
+		msg = text or ""
+		render()
+	end
+
+	function L.destroy()
+		if not open then return end
+		open = false
+		pcall(function() conn:Disconnect() end)
+		pcall(function() blurFx:Destroy() end)
+		pcall(function() g:Destroy() end)
+	end
+
+	-- finishes at 100%, holds a beat, fades out, then removes itself.
+	-- finish(true) waits until it is fully gone; finish() returns straight away.
+	function L.finish(block)
+		local function run()
+			if not open then return end
+			lastActive = os.clock()
+			target = 1
+			msg = "Done"
+			local t0 = os.clock()
+			while open and shown < 0.999 and os.clock() - t0 < 1.5 do
+				RunService.RenderStepped:Wait()
+			end
+			task.wait(0.25)
+			if not open then return end
+			fadeTo(false, 0.4)
+			task.wait(0.45)
+			L.destroy()
+		end
+		if block then run() else task.spawn(run) end
+	end
+
+	-- safety net: if the script errors part-way, never leave the screen stuck
+	task.spawn(function()
+		while open do
+			task.wait(1)
+			if open and os.clock() - lastActive > 20 then
+				L.destroy()
+			end
+		end
+	end)
+
+	return L
+end
+
+function Loader.step(p, text)
+	local c = Loader.cur
+	if c then c.set(p, text) end
+end
+function Loader.finish(block)
+	local c = Loader.cur
+	if c then c.finish(block) end
+end
+function Loader.destroy()
+	local c = Loader.cur
+	Loader.cur = nil
+	if c then c.destroy() end
+end
+-- ========================== END LOGO + LOADING SCREEN ==========================
+
+-- loading screen first (blurred + dimmed game, spinning logo), then the key box appears
+Loader.cur = Loader.create()
+Loader.step(0.4, "Starting")
+Loader.step(0.8, "Preparing key system")
+Loader.finish(true)
+
+-- ============================ KEY SYSTEM ============================
+-- Shows a key box before anything else loads. Correct key = script continues.
+-- Closing the box (X button) cancels the load so the player can go get the key.
+do
+	-- Every key below unlocks the script. Give each tester their own one.
+	local VALID_KEYS = {
+		"MXG1-910A-JP8L-X81V", -- original
+		"298U-SBSQ-1URP-ZLX4",
+		"7W5W-I42X-H85M-GN77",
+		"8747-7RBB-XVL9-CSCT",
+		"EMFY-IVQ7-AK32-39HY",
+		"IGGW-RRAZ-N3PH-33KS",
+		"J8V4-5LN3-I1B8-HUAY",
+		"PMQU-XOA5-0ALT-1IW2",
+		"SNB7-3SVA-T460-YMMZ",
+		"T3IS-IAHW-I85C-UQZA",
+		"VKBQ-BO6W-A3E9-6NOV",
+	}
+
+	local function normalise(s)
+		s = tostring(s or "")
+		s = string.gsub(s, "^%s+", "")
+		s = string.gsub(s, "%s+$", "")
+		return string.upper(s)
+	end
+
+	local function isValidKey(s)
+		local n = normalise(s)
+		for _, k in ipairs(VALID_KEYS) do
+			if n == normalise(k) then return true end
+		end
+		return false
+	end
+
+	local keyGui = Instance.new("ScreenGui")
+	keyGui.Name = "OULKeyUI"
+	keyGui.ResetOnSpawn = false
+	keyGui.IgnoreGuiInset = true
+	keyGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	keyGui.DisplayOrder = 1000000
+	pcall(function() keyGui.OnTopOfCoreBlur = true end)
+
+	local parentOK = false
+	pcall(function()
+		local host = gethui and gethui() or game:GetService("CoreGui")
+		keyGui.Parent = host
+		parentOK = (keyGui.Parent == host)
+	end)
+	if not parentOK then
+		keyGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+	end
+
+	-- remove any leftover key window from a previous run
+	for _, host in ipairs({ LocalPlayer:FindFirstChild("PlayerGui"), pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui") or nil }) do
+		if host then
+			for _, c in ipairs(host:GetChildren()) do
+				if c.Name == "OULKeyUI" and c ~= keyGui then pcall(function() c:Destroy() end) end
+			end
+		end
+	end
+
+	local BG = Color3.fromRGB(8, 9, 20)
+	local FIELD = Color3.fromRGB(34, 34, 48)
+	local OUTLINE = Color3.fromRGB(44, 46, 86)
+	local ACCENT = Color3.fromRGB(140, 95, 255)
+	local TEXT = Color3.fromRGB(228, 232, 255)
+	local DIM = Color3.fromRGB(130, 136, 175)
+	local GOOD = Color3.fromRGB(90, 200, 120)
+	local BAD = Color3.fromRGB(235, 90, 90)
+	local KFONT = Enum.Font.RobotoMono
+	local cooldownUntil = 0
+
+	-- blur + darken everything behind the key box
+	for _, e in ipairs(Lighting:GetChildren()) do
+		if e.Name == "OULKeyBlur" then pcall(function() e:Destroy() end) end
+	end
+	local keyBlur = Instance.new("BlurEffect")
+	keyBlur.Name = "OULKeyBlur"
+	keyBlur.Size = 0
+	keyBlur.Parent = Lighting
+	TweenService:Create(keyBlur, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = 8 }):Play()
+
+	local dim = Instance.new("Frame")
+	dim.Size = UDim2.fromScale(1, 1)
+	dim.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	dim.BackgroundTransparency = 1
+	dim.BorderSizePixel = 0
+	dim.ZIndex = 1
+	dim.Parent = keyGui
+	TweenService:Create(dim, TweenInfo.new(0.3), { BackgroundTransparency = 0.45 }):Play()
+
+	local panel = Instance.new("Frame")
+	panel.AnchorPoint = Vector2.new(0.5, 0.5)
+	panel.Position = UDim2.fromScale(0.5, 0.5)
+	panel.Size = UDim2.fromOffset(340, 170)
+	panel.BackgroundColor3 = BG
+	panel.BorderSizePixel = 0
+	panel.Active = true
+	panel.ZIndex = 10
+	panel.Parent = keyGui
+	Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 6)
+	local pStroke = Instance.new("UIStroke")
+	pStroke.Color = OUTLINE
+	pStroke.Thickness = 1
+	pStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	pStroke.Parent = panel
+
+	-- frees the mouse so the box can be clicked in first person / locked-mouse games
+	local modal = Instance.new("TextButton")
+	modal.Size = UDim2.fromOffset(0, 0)
+	modal.BackgroundTransparency = 1
+	modal.Text = ""
+	modal.Modal = true
+	modal.Parent = panel
+
+	local topLine = Instance.new("Frame")
+	topLine.Size = UDim2.new(1, 0, 0, 2)
+	topLine.BackgroundColor3 = ACCENT
+	topLine.BorderSizePixel = 0
+	topLine.ZIndex = 11
+	topLine.Parent = panel
+
+	local title = Instance.new("TextLabel")
+	title.BackgroundTransparency = 1
+	title.Position = UDim2.fromOffset(14, 10)
+	title.Size = UDim2.new(1, -56, 0, 20)
+	title.Font = KFONT
+	title.TextSize = 14
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.TextColor3 = TEXT
+	title.Text = "OUL  -  Enter Key"
+	title.ZIndex = 11
+	title.Parent = panel
+
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.AnchorPoint = Vector2.new(1, 0)
+	closeBtn.Position = UDim2.new(1, -8, 0, 8)
+	closeBtn.Size = UDim2.fromOffset(24, 24)
+	closeBtn.BackgroundTransparency = 1
+	closeBtn.BorderSizePixel = 0
+	closeBtn.AutoButtonColor = false
+	closeBtn.Font = KFONT
+	closeBtn.TextSize = 14
+	closeBtn.Text = "X"
+	closeBtn.TextColor3 = DIM
+	closeBtn.ZIndex = 12
+	closeBtn.Parent = panel
+	Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 4)
+	closeBtn.MouseEnter:Connect(function()
+		closeBtn.TextColor3 = BAD
+	end)
+	closeBtn.MouseLeave:Connect(function()
+		closeBtn.TextColor3 = DIM
+	end)
+
+	local box = Instance.new("TextBox")
+	box.Position = UDim2.fromOffset(14, 62)
+	box.Size = UDim2.new(1, -28, 0, 30)
+	box.BackgroundColor3 = FIELD
+	box.BorderSizePixel = 0
+	box.ClearTextOnFocus = false
+	box.PlaceholderText = ""
+	box.PlaceholderColor3 = DIM
+	box.Text = ""
+	box.TextColor3 = TEXT
+	box.Font = KFONT
+	box.TextSize = 13
+	box.ZIndex = 11
+	box.Parent = panel
+	Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
+	local bStroke = Instance.new("UIStroke")
+	bStroke.Color = OUTLINE
+	bStroke.Thickness = 1
+	bStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	bStroke.Parent = box
+
+	local status = Instance.new("TextLabel")
+	status.BackgroundTransparency = 1
+	status.Position = UDim2.fromOffset(14, 96)
+	status.Size = UDim2.new(1, -28, 0, 14)
+	status.Font = KFONT
+	status.TextSize = 11
+	status.TextXAlignment = Enum.TextXAlignment.Left
+	status.TextColor3 = DIM
+	status.Text = ""
+	status.ZIndex = 11
+	status.Parent = panel
+
+	local submit = Instance.new("TextButton")
+	submit.Position = UDim2.fromOffset(14, 120)
+	submit.Size = UDim2.new(1, -28, 0, 32)
+	submit.BackgroundColor3 = ACCENT
+	submit.BorderSizePixel = 0
+	submit.AutoButtonColor = false
+	submit.Font = KFONT
+	submit.TextSize = 13
+	submit.Text = "Submit"
+	submit.TextColor3 = Color3.fromRGB(255, 255, 255)
+	submit.ZIndex = 11
+	submit.Parent = panel
+	Instance.new("UICorner", submit).CornerRadius = UDim.new(0, 4)
+	submit.MouseEnter:Connect(function()
+		if os.clock() >= cooldownUntil then
+			submit.BackgroundColor3 = ACCENT:Lerp(Color3.fromRGB(255, 255, 255), 0.15)
+		end
+	end)
+	submit.MouseLeave:Connect(function()
+		if os.clock() >= cooldownUntil then submit.BackgroundColor3 = ACCENT end
+	end)
+
+	-- drag the window by its top area
+	do
+		local dragging, dragStart, startPos
+		panel.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 then
+				local rel = input.Position.Y - panel.AbsolutePosition.Y
+				if rel <= 36 then
+					dragging, dragStart, startPos = true, input.Position, panel.Position
+				end
+			end
+		end)
+		UserInputService.InputChanged:Connect(function(input)
+			if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+				local d = input.Position - dragStart
+				panel.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+			end
+		end)
+		UserInputService.InputEnded:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+		end)
+	end
+
+	local result = nil -- true = unlocked, false = closed
+	local busy = false
+	local COOLDOWN = 3 -- seconds to wait after a wrong key
+
+	local function shake()
+		local base = panel.Position
+		for _, dx in ipairs({ 8, -8, 5, -5, 2, 0 }) do
+			panel.Position = UDim2.new(base.X.Scale, base.X.Offset + dx, base.Y.Scale, base.Y.Offset)
+			task.wait(0.035)
+		end
+	end
+
+	local function attempt()
+		if busy or result ~= nil then return end
+		if os.clock() < cooldownUntil then return end -- still on cooldown
+		busy = true
+		if isValidKey(box.Text) then
+			status.TextColor3 = GOOD
+			status.Text = "key accepted - loading..."
+			bStroke.Color = GOOD
+			task.wait(0.4)
+			result = true
+		else
+			cooldownUntil = os.clock() + COOLDOWN
+			status.TextColor3 = BAD
+			bStroke.Color = BAD
+			submit.BackgroundColor3 = ACCENT:Lerp(BG, 0.6)
+			task.spawn(function()
+				while result == nil do
+					local left = cooldownUntil - os.clock()
+					if left <= 0 then break end
+					status.Text = string.format("wrong key - wait %.1fs", left)
+					task.wait(0.1)
+				end
+				if result == nil then
+					status.Text = ""
+					bStroke.Color = OUTLINE
+					submit.BackgroundColor3 = ACCENT
+				end
+			end)
+			shake()
+		end
+		busy = false
+	end
+
+	submit.MouseButton1Click:Connect(attempt)
+	box.FocusLost:Connect(function(enterPressed)
+		if enterPressed then attempt() end
+	end)
+	closeBtn.MouseButton1Click:Connect(function()
+		if result == nil then result = false end
+	end)
+
+	-- wait here until the player unlocks or closes the box
+	while result == nil do
+		task.wait(0.1)
+	end
+
+	local function fadeKeyBlur()
+		pcall(function()
+			TweenService:Create(keyBlur, TweenInfo.new(0.25), { Size = 0 }):Play()
+			task.delay(0.3, function() pcall(function() keyBlur:Destroy() end) end)
+		end)
+	end
+
+	if result ~= true then
+		pcall(function() keyGui:Destroy() end)
+		fadeKeyBlur()
+		return -- closed without a key: the script does not load
+	end
+
+	-- key accepted: the loading screen covers the key box, then the key box goes away
+	Loader.cur = Loader.create()
+	Loader.step(0.3, "Checking key")
+	pcall(function() keyGui:Destroy() end)
+	fadeKeyBlur()
+	Loader.step(0.7, "Unlocking")
+	Loader.step(1, "Key accepted")
+	task.wait(0.15)
+	Loader.cur.reset("Starting")
+end
+-- ========================== END KEY SYSTEM ==========================
+
+if not Loader.cur then Loader.cur = Loader.create() end
+Loader.step(0.08, "Preparing")
+
 if shared.OULCleanup then
 	pcall(shared.OULCleanup)
 	shared.OULCleanup = nil
@@ -273,74 +879,6 @@ local THEME_TWEEN = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirect
 local SLIDE = TweenInfo.new(0.24, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 
 local FONT = Enum.Font.RobotoMono
-
-local LOGO_ID = ""
-local LOGO_FILE = "OUL_logo.png"
-local LOGO_PURPLE = Color3.fromRGB(145, 90, 255)
-local LOGO_BLUE = Color3.fromRGB(50, 145, 255)
-
-local function makeLogo(parent, size, x, y, zIndex)
-	zIndex = zIndex or 101
-
-	local src
-	if LOGO_ID ~= "" then
-		src = "rbxassetid://" .. LOGO_ID
-	else
-		pcall(function()
-			if isfile and getcustomasset and isfile(LOGO_FILE) then
-				src = getcustomasset(LOGO_FILE)
-			end
-		end)
-	end
-
-	if src then
-		local img = Instance.new("ImageLabel")
-		img.Name = "OULLogo"
-		img.BackgroundTransparency = 1
-		img.BorderSizePixel = 0
-		img.Size = UDim2.fromOffset(size, size)
-		img.Position = UDim2.fromOffset(x, y)
-		img.ScaleType = Enum.ScaleType.Fit
-		img.Image = src
-		img.ZIndex = zIndex
-		img.Parent = parent
-
-		Instance.new("UICorner", img).CornerRadius = UDim.new(1, 0)
-		return img
-	end
-
-	local ring = Instance.new("Frame")
-	ring.Name = "OULLogo"
-	ring.BackgroundTransparency = 1
-	ring.BorderSizePixel = 0
-	ring.Size = UDim2.fromOffset(size, size)
-	ring.Position = UDim2.fromOffset(x, y)
-	ring.ZIndex = zIndex
-	ring.Parent = parent
-	Instance.new("UICorner", ring).CornerRadius = UDim.new(1, 0)
-
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.fromRGB(255, 255, 255)
-	stroke.Thickness = math.max(1.5, size / 10)
-	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	stroke.Parent = ring
-
-	local grad = Instance.new("UIGradient")
-	grad.Color = ColorSequence.new(LOGO_PURPLE, LOGO_BLUE)
-	grad.Rotation = 45
-	grad.Parent = stroke
-
-	local lbl = Instance.new("TextLabel")
-	lbl.BackgroundTransparency = 1
-	lbl.Size = UDim2.new(1, 0, 1, 0)
-	lbl.Text = "OUL"
-	lbl.Font = Enum.Font.GothamBold
-	lbl.TextSize = math.max(6, math.floor(size * 0.36))
-	lbl.TextColor3 = Color3.fromRGB(240, 242, 252)
-	lbl.ZIndex = zIndex
-	lbl.Parent = ring
-	return ring
-end
 
 local function tween(obj, props, info)
 	TweenService:Create(obj, info or EASE, props):Play()
@@ -559,7 +1097,7 @@ local function refreshBindUI()
 	for id, btn in pairs(bindButtons) do
 		local b = getBind(id)
 		if rebinding == b then
-			btn.Text = "press a key..."
+			btn.Text = "press key/mouse"
 		else
 			btn.Text = keyName(b.input)
 		end
@@ -676,7 +1214,7 @@ local function stringToInput(str)
 	if kind == "K" then
 		local ok, v = pcall(function() return Enum.KeyCode[name] end)
 		if ok then return v end
-	elseif kind == "M" and (name == "MouseButton2" or name == "MouseButton3") then
+	elseif kind == "M" and (name == "MouseButton1" or name == "MouseButton2" or name == "MouseButton3") then
 		return Enum.UserInputType[name]
 	end
 	return nil
@@ -990,6 +1528,7 @@ if ConfigAPI.available then
 end
 end
 
+Loader.step(0.25, "Loading settings")
 local CORPSE_WORDS = { "ragdoll", "corpse", "dead", "bodies", "debris", "gib" }
 local function isAlive(model)
 	local hum = model:FindFirstChildOfClass("Humanoid")
@@ -1050,6 +1589,7 @@ local function espEntities()
 	return list
 end
 
+Loader.step(0.35, "Setting up ESP")
 local espFolder = Instance.new("Folder")
 espFolder.Name = "OULESP"
 espFolder.Parent = workspace
@@ -1606,6 +2146,7 @@ task.spawn(function()
 	end
 end)
 
+Loader.step(0.45, "Building interface")
 local gui = Instance.new("ScreenGui")
 gui.Name = "AimbotUI"
 gui.ResetOnSpawn = false
@@ -1645,6 +2186,17 @@ local circleStroke = Instance.new("UIStroke", circle)
 circleStroke.Color = FOVColor
 circleStroke.Thickness = 1.5
 circleStroke.Transparency = 0.3
+
+-- darkens the screen behind the menu while it is open (removed with the gui on unload/panic)
+local menuDim = Instance.new("Frame")
+menuDim.Name = "OULMenuDim"
+menuDim.Size = UDim2.fromScale(1, 1)
+menuDim.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+menuDim.BackgroundTransparency = 1
+menuDim.BorderSizePixel = 0
+menuDim.Active = false
+menuDim.ZIndex = 0
+menuDim.Parent = gui
 
 local function corner(obj, r)
 	local c = Instance.new("UICorner")
@@ -2194,8 +2746,10 @@ local function setMenuVisible(visible)
 	if visible then
 		panel.Visible = true
 		tween(panel, { GroupTransparency = Settings.UITransparency / 100 }, FADE_IN)
+		tween(menuDim, { BackgroundTransparency = 0.5 }, FADE_IN)
 	else
 		tween(panel, { GroupTransparency = 1 }, FADE_OUT)
+		tween(menuDim, { BackgroundTransparency = 1 }, FADE_OUT)
 		task.delay(FADE_OUT.Time, function()
 			if menuToken == token then
 				panel.Visible = false
@@ -3350,6 +3904,7 @@ local function applyLayout()
 end
 
 do
+	Loader.step(0.55, "Building menu")
 	local aimPage = newPage("combat_aimbot", true)
 	local g = newGroup(aimPage, 1, "Aimbot")
 	addCheckbox(g, "Enabled", "Enabled")
@@ -4039,6 +4594,8 @@ do
 		bindButtons[id] = btn
 
 		btn.MouseButton1Click:Connect(function()
+			-- the click that just bound M1 must not start another rebind
+			if os.clock() - (ConfigAPI.bindJustSet or 0) < 0.35 then return end
 			rebinding = (rebinding == b) and nil or b
 			refreshBindUI()
 		end)
@@ -4063,7 +4620,8 @@ do
 	for _, id in ipairs({ "menu", "panic", "Watermark", "KeybindList", "BlurEnabled", "Notifications" }) do
 		addKeybindRow(m, id)
 	end
-	addNote(m, "click a key, then press a new one")
+	addNote(m, "click a bind, then press a key")
+	addNote(m, "or a mouse button (M1/M2/M3)")
 	addNote(m, "Esc  -  cancel    Backspace  -  clear")
 	addNote(m, "Panic  -  unloads everything")
 	addButton(m, "Reset all keybinds", Color3.fromRGB(70, 90, 140), Color3.fromRGB(90, 112, 170), function()
@@ -4278,6 +4836,7 @@ do
 end
 
 do
+	Loader.step(0.75, "Finishing menu")
 	local MAX_ROWS = 4
 	local ROW_H = 32
 
@@ -4479,6 +5038,7 @@ end)
 
 setMenuVisible(true)
 
+Loader.step(0.85, "Setting up combat")
 local canDamage
 do
 
@@ -4654,6 +5214,7 @@ local function getTarget()
 	return best
 end
 
+do
 local triggerSeenAt = nil
 local lastShot = 0
 
@@ -4761,6 +5322,8 @@ track(RunService.Heartbeat:Connect(function()
 		fireClick()
 	end
 end))
+
+end
 
 local tracerLines = {}
 local TRACER_MAX_DISTANCE = 1000
@@ -5302,6 +5865,7 @@ do
 	ConfigAPI.skyRestore = disable
 end
 
+Loader.step(0.93, "Setting up movement")
 local flyActive = false
 
 local function flyDirection()
@@ -5835,7 +6399,8 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 			else
 				return
 			end
-		elseif input.UserInputType == Enum.UserInputType.MouseButton2
+		elseif input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.MouseButton2
 			or input.UserInputType == Enum.UserInputType.MouseButton3 then
 			newInput = input.UserInputType
 		else
@@ -5856,6 +6421,7 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 			end
 		end
 		b.input = newInput or nil
+		ConfigAPI.bindJustSet = os.clock()
 		Settings.Holding = false
 		rebinding = nil
 		refreshBindUI()
@@ -5873,7 +6439,9 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 	if processed then return end
 
 	for _, b in ipairs(Binds) do
-		if b.input and inputMatches(input, b.input) then
+		-- mouse-button binds are ignored while the menu is open (clicking the menu must not trigger them)
+		local mouseBlocked = b.input and b.input.EnumType == Enum.UserInputType and menuOpen and b.kind ~= "menu"
+		if b.input and not mouseBlocked and inputMatches(input, b.input) then
 			if b.kind == "toggle" then
 				local t = toggles[b.key]
 				if t then t.toggle() end
@@ -5893,6 +6461,7 @@ track(UserInputService.InputBegan:Connect(function(input, processed)
 	end
 end))
 
+do
 local RETURN_WINDOW = 1.0
 local JUMP_ANGLE = math.rad(25)
 local aimEndedAt = 0
@@ -5982,7 +6551,10 @@ RunService:BindToRenderStep("Aimbot", Enum.RenderPriority.Camera.Value + 1, func
 	Camera.CFrame = Camera.CFrame:Lerp(goal, alpha)
 end)
 
+end
+
 local function cleanup()
+	pcall(Loader.destroy)
 	alive = false
 
 	Settings.Enabled = false
@@ -6077,3 +6649,4 @@ local function cleanup()
 end
 
 shared.OULCleanup = cleanup
+Loader.finish()
