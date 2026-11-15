@@ -1224,7 +1224,7 @@ local SAVE_NUMBERS = {
 	FOV = { 20, 500 }, Strength = { 1, 500 }, PredictionMs = { 0, 500 }, TriggerDelay = { 0, 300 },
 	BlurAmount = { 1, 56 }, UITransparency = { 0, 70 }, UIScale = { 50, 150 }, FlySpeed = { 5, 1000 },
 	VortexSpeed = { 1, 100 }, VortexRadius = { 2, 60 }, SpeedValue = { 16, 250 },
-	RageDistance = { 2, 20 }, OrbitSpeed = { 1, 30 }, VoidInterval = { 10, 2000 }, VoidDistance = { 1, 1000000 }, VoidRoamMs = { 10, 2000 }, AttackInterval = { 10, 2000 }, AttackHeight = { 0, 50 }, SkyBrightness = { 0, 100 }, MouseGain = { 5, 100 },
+	RageDistance = { 2, 20 }, OrbitSpeed = { 1, 30 }, VoidInterval = { 10, 2000 }, VoidDistance = { 1, 10000000 }, VoidRoamMs = { 10, 2000 }, AttackInterval = { 10, 2000 }, AttackHeight = { 0, 50 }, SkyBrightness = { 0, 100 }, MouseGain = { 5, 100 },
 }
 local SAVE_THEME = { "Text", "Switch", "Accent", "Background", "Outline" }
 local SAVE_ESP = { "Fill", "Outline", "Tracer", "Name", "Box", "BoxFill", "Skeleton", "Sky", "Radar", "RadarLines" }
@@ -4124,7 +4124,7 @@ do
 	local vsg = newGroup(ragePage, 1, "Void Spam")
 	addCheckbox(vsg, "Void Spam", "VoidSpam")
 	addSlider(vsg, "Void Interval", 10, 2000, "VoidInterval")
-	addSlider(vsg, "Void Distance", 1, 1000000, "VoidDistance")
+	addSlider(vsg, "Void Distance", 1, 10000000, "VoidDistance")
 	addCheckbox(vsg, "Roam in void", "VoidRoam")
 	addSlider(vsg, "Roam Interval (ms)", 10, 2000, "VoidRoamMs")
 	addSlider(vsg, "Attack Interval", 10, 2000, "AttackInterval")
