@@ -1010,6 +1010,8 @@ local Settings = {
 	VoidSpam = false,
 	VoidInterval = 200,
 	VoidDistance = 1500,
+	VoidRoam = true,
+	VoidRoamMs = 100,
 	AttackInterval = 200,
 	AttackHeight = 6,
 	RageMode = "Closest",
@@ -1183,7 +1185,7 @@ local SAVE_BOOLS = {
 	"Enabled", "IgnoreFOV", "TeamCheck", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
 	"Boxes", "BoxFill", "Skeleton", "ESPHealth", "Skybox", "SkyRainbow", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed", "Fullbright", "NoFog", "Radar", "Prediction",
 	"InfiniteJump", "Notifications", "TargetNPCs", "ESPNPCs", "MouseTP", "KeybindList", "Ragebot",
-	"RageBehind", "RageAbove", "RageBelow", "RageOrbit", "MouseAim",
+	"RageBehind", "RageAbove", "RageBelow", "RageOrbit", "MouseAim", "VoidRoam",
 }
 local SAVE_NUMBERS = {
 	RadarRange = { 50, 1000 },
@@ -1195,7 +1197,7 @@ local SAVE_NUMBERS = {
 	FOV = { 20, 500 }, Strength = { 1, 500 }, PredictionMs = { 0, 500 }, TriggerDelay = { 0, 300 },
 	BlurAmount = { 1, 56 }, UITransparency = { 0, 70 }, UIScale = { 50, 150 }, FlySpeed = { 5, 1000 },
 	VortexSpeed = { 1, 100 }, VortexRadius = { 2, 60 }, SpeedValue = { 16, 250 },
-	RageDistance = { 2, 20 }, OrbitSpeed = { 1, 30 }, VoidInterval = { 10, 2000 }, VoidDistance = { 1, 1000000 }, AttackInterval = { 10, 2000 }, AttackHeight = { 0, 50 }, SkyBrightness = { 0, 100 }, MouseGain = { 5, 100 },
+	RageDistance = { 2, 20 }, OrbitSpeed = { 1, 30 }, VoidInterval = { 10, 2000 }, VoidDistance = { 1, 1000000 }, VoidRoamMs = { 10, 2000 }, AttackInterval = { 10, 2000 }, AttackHeight = { 0, 50 }, SkyBrightness = { 0, 100 }, MouseGain = { 5, 100 },
 }
 local SAVE_THEME = { "Text", "Switch", "Accent", "Background", "Outline" }
 local SAVE_ESP = { "Fill", "Outline", "Tracer", "Name", "Box", "BoxFill", "Skeleton", "Sky", "Radar", "RadarLines" }
@@ -4096,6 +4098,8 @@ do
 	addCheckbox(vsg, "Void Spam", "VoidSpam")
 	addSlider(vsg, "Void Interval", 10, 2000, "VoidInterval")
 	addSlider(vsg, "Void Distance", 1, 1000000, "VoidDistance")
+	addCheckbox(vsg, "Roam in void", "VoidRoam")
+	addSlider(vsg, "Roam Interval (ms)", 10, 2000, "VoidRoamMs")
 	addSlider(vsg, "Attack Interval", 10, 2000, "AttackInterval")
 	addSlider(vsg, "Attack Height", 0, 50, "AttackHeight")
 
@@ -6412,7 +6416,7 @@ do
 
 	local function enter(st, phase)
 		st.phase, st.since = phase, os.clock()
-		if phase == "void" then st.voidPos = randomVoidPos(st) end
+		if phase == "void" then st.voidPos, st.hopAt = randomVoidPos(st), os.clock() end
 	end
 
 	-- no collisions + no fall logic while spamming
@@ -6600,7 +6604,10 @@ do
 			end
 		end
 
-		-- void phase: hold the character at the void point
+		-- void phase: teleport to a new random void point every Roam Interval (or stay put if Roam is off)
+		if Settings.VoidRoam and now - (st.hopAt or 0) >= Settings.VoidRoamMs / 1000 then
+			st.voidPos, st.hopAt = randomVoidPos(st), now
+		end
 		hold(root, CFrame.new(st.voidPos))
 		setRageStatus("Void spam: " .. (st.why or "in void"))
 	end))
