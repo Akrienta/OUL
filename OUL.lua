@@ -207,33 +207,6 @@ end
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
--- ============================ EXECUTOR BLOCKLIST ============================
--- Kicks the player straight away if their executor is on this list.
--- To block another one, add a line: { match = "name in lowercase", reason = "kick message" }
-local BLOCKED_EXECUTORS = {
-	{ match = "xeno", reason = "Xeno Is Not Supported" },
-}
-do
-	local execName
-	pcall(function()
-		if type(identifyexecutor) == "function" then
-			execName = identifyexecutor()
-		elseif type(getexecutorname) == "function" then
-			execName = getexecutorname()
-		end
-	end)
-	execName = string.lower(tostring(execName or ""))
-	if execName ~= "" then
-		for _, b in ipairs(BLOCKED_EXECUTORS) do
-			if string.find(execName, b.match, 1, true) then
-				pcall(function() LocalPlayer:Kick(b.reason) end)
-				return -- stop the script here, nothing else loads
-			end
-		end
-	end
-end
--- ========================== END EXECUTOR BLOCKLIST ==========================
-
 -- ============================ LOGO + LOADING SCREEN ============================
 -- One loading screen shared by the key gate and the main script load.
 -- Dark navy backdrop, the OUL logo in the middle that spins as progress climbs,
@@ -556,284 +529,324 @@ do
 		return false
 	end
 
-	local keyGui = Instance.new("ScreenGui")
-	keyGui.Name = "OULKeyUI"
-	keyGui.ResetOnSpawn = false
-	keyGui.IgnoreGuiInset = true
-	keyGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	keyGui.DisplayOrder = 1000000
-	pcall(function() keyGui.OnTopOfCoreBlur = true end)
+	-- ===== remember the key for 24 hours (needs executor file support) =====
+	-- The key + the time it was entered are saved to a file. If the file is younger than
+	-- REMEMBER_SECONDS and the key is still in VALID_KEYS, the key box is skipped.
+	-- Remove a key from VALID_KEYS and anyone remembered with it is asked again.
+	local REMEMBER_SECONDS = 24 * 60 * 60
+	local REMEMBER_FILE = "OULKeyPass_" .. tostring(LocalPlayer.UserId) .. ".txt"
 
-	local parentOK = false
-	pcall(function()
-		local host = gethui and gethui() or game:GetService("CoreGui")
-		keyGui.Parent = host
-		parentOK = (keyGui.Parent == host)
-	end)
-	if not parentOK then
-		keyGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+	local function loadRemembered()
+		if type(readfile) ~= "function" or type(isfile) ~= "function" then return false end
+		local ok, saved = pcall(function()
+			if isfile(REMEMBER_FILE) then return readfile(REMEMBER_FILE) end
+		end)
+		if not ok or type(saved) ~= "string" then return false end
+		local key, stamp = string.match(saved, "^(.-)|(%d+)%s*$")
+		if not key or not stamp then return false end
+		stamp = tonumber(stamp)
+		if not stamp then return false end
+		local age = os.time() - stamp
+		if age < 0 or age >= REMEMBER_SECONDS then return false end
+		return isValidKey(key)
 	end
 
-	-- remove any leftover key window from a previous run
-	for _, host in ipairs({ LocalPlayer:FindFirstChild("PlayerGui"), pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui") or nil }) do
-		if host then
-			for _, c in ipairs(host:GetChildren()) do
-				if c.Name == "OULKeyUI" and c ~= keyGui then pcall(function() c:Destroy() end) end
+	local function saveRemembered(key)
+		if type(writefile) ~= "function" then return end
+		pcall(writefile, REMEMBER_FILE, normalise(key) .. "|" .. tostring(os.time()))
+	end
+	-- ===== end remember =====
+
+	local remembered = loadRemembered()
+	if remembered then
+		-- still unlocked from earlier: skip the key box
+		Loader.cur = Loader.create()
+		Loader.step(0.5, "Key remembered")
+		Loader.step(1, "Unlocking")
+		task.wait(0.15)
+		Loader.cur.reset("Starting")
+	else
+
+		local keyGui = Instance.new("ScreenGui")
+		keyGui.Name = "OULKeyUI"
+		keyGui.ResetOnSpawn = false
+		keyGui.IgnoreGuiInset = true
+		keyGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+		keyGui.DisplayOrder = 1000000
+		pcall(function() keyGui.OnTopOfCoreBlur = true end)
+
+		local parentOK = false
+		pcall(function()
+			local host = gethui and gethui() or game:GetService("CoreGui")
+			keyGui.Parent = host
+			parentOK = (keyGui.Parent == host)
+		end)
+		if not parentOK then
+			keyGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+		end
+
+		-- remove any leftover key window from a previous run
+		for _, host in ipairs({ LocalPlayer:FindFirstChild("PlayerGui"), pcall(function() return game:GetService("CoreGui") end) and game:GetService("CoreGui") or nil }) do
+			if host then
+				for _, c in ipairs(host:GetChildren()) do
+					if c.Name == "OULKeyUI" and c ~= keyGui then pcall(function() c:Destroy() end) end
+				end
 			end
 		end
-	end
 
-	local BG = Color3.fromRGB(8, 9, 20)
-	local FIELD = Color3.fromRGB(34, 34, 48)
-	local OUTLINE = Color3.fromRGB(44, 46, 86)
-	local ACCENT = Color3.fromRGB(140, 95, 255)
-	local TEXT = Color3.fromRGB(228, 232, 255)
-	local DIM = Color3.fromRGB(130, 136, 175)
-	local GOOD = Color3.fromRGB(90, 200, 120)
-	local BAD = Color3.fromRGB(235, 90, 90)
-	local KFONT = Enum.Font.RobotoMono
-	local cooldownUntil = 0
+		local BG = Color3.fromRGB(8, 9, 20)
+		local FIELD = Color3.fromRGB(34, 34, 48)
+		local OUTLINE = Color3.fromRGB(44, 46, 86)
+		local ACCENT = Color3.fromRGB(140, 95, 255)
+		local TEXT = Color3.fromRGB(228, 232, 255)
+		local DIM = Color3.fromRGB(130, 136, 175)
+		local GOOD = Color3.fromRGB(90, 200, 120)
+		local BAD = Color3.fromRGB(235, 90, 90)
+		local KFONT = Enum.Font.RobotoMono
+		local cooldownUntil = 0
 
-	-- blur + darken everything behind the key box
-	for _, e in ipairs(Lighting:GetChildren()) do
-		if e.Name == "OULKeyBlur" then pcall(function() e:Destroy() end) end
-	end
-	local keyBlur = Instance.new("BlurEffect")
-	keyBlur.Name = "OULKeyBlur"
-	keyBlur.Size = 0
-	keyBlur.Parent = Lighting
-	TweenService:Create(keyBlur, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = 8 }):Play()
+		-- blur + darken everything behind the key box
+		for _, e in ipairs(Lighting:GetChildren()) do
+			if e.Name == "OULKeyBlur" then pcall(function() e:Destroy() end) end
+		end
+		local keyBlur = Instance.new("BlurEffect")
+		keyBlur.Name = "OULKeyBlur"
+		keyBlur.Size = 0
+		keyBlur.Parent = Lighting
+		TweenService:Create(keyBlur, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Size = 8 }):Play()
 
-	local dim = Instance.new("Frame")
-	dim.Size = UDim2.fromScale(1, 1)
-	dim.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-	dim.BackgroundTransparency = 1
-	dim.BorderSizePixel = 0
-	dim.ZIndex = 1
-	dim.Parent = keyGui
-	TweenService:Create(dim, TweenInfo.new(0.3), { BackgroundTransparency = 0.2 }):Play()
+		local dim = Instance.new("Frame")
+		dim.Size = UDim2.fromScale(1, 1)
+		dim.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+		dim.BackgroundTransparency = 1
+		dim.BorderSizePixel = 0
+		dim.ZIndex = 1
+		dim.Parent = keyGui
+		TweenService:Create(dim, TweenInfo.new(0.3), { BackgroundTransparency = 0.2 }):Play()
 
-	local panel = Instance.new("Frame")
-	panel.AnchorPoint = Vector2.new(0.5, 0.5)
-	panel.Position = UDim2.fromScale(0.5, 0.5)
-	panel.Size = UDim2.fromOffset(340, 170)
-	panel.BackgroundColor3 = BG
-	panel.BorderSizePixel = 0
-	panel.Active = true
-	panel.ZIndex = 10
-	panel.Parent = keyGui
-	Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 6)
-	local pStroke = Instance.new("UIStroke")
-	pStroke.Color = OUTLINE
-	pStroke.Thickness = 1
-	pStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	pStroke.Parent = panel
+		local panel = Instance.new("Frame")
+		panel.AnchorPoint = Vector2.new(0.5, 0.5)
+		panel.Position = UDim2.fromScale(0.5, 0.5)
+		panel.Size = UDim2.fromOffset(340, 170)
+		panel.BackgroundColor3 = BG
+		panel.BorderSizePixel = 0
+		panel.Active = true
+		panel.ZIndex = 10
+		panel.Parent = keyGui
+		Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 6)
+		local pStroke = Instance.new("UIStroke")
+		pStroke.Color = OUTLINE
+		pStroke.Thickness = 1
+		pStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		pStroke.Parent = panel
 
-	-- frees the mouse so the box can be clicked in first person / locked-mouse games
-	local modal = Instance.new("TextButton")
-	modal.Size = UDim2.fromOffset(0, 0)
-	modal.BackgroundTransparency = 1
-	modal.Text = ""
-	modal.Modal = true
-	modal.Parent = panel
+		-- frees the mouse so the box can be clicked in first person / locked-mouse games
+		local modal = Instance.new("TextButton")
+		modal.Size = UDim2.fromOffset(0, 0)
+		modal.BackgroundTransparency = 1
+		modal.Text = ""
+		modal.Modal = true
+		modal.Parent = panel
 
-	local topLine = Instance.new("Frame")
-	topLine.Size = UDim2.new(1, 0, 0, 2)
-	topLine.BackgroundColor3 = ACCENT
-	topLine.BorderSizePixel = 0
-	topLine.ZIndex = 11
-	topLine.Parent = panel
+		local topLine = Instance.new("Frame")
+		topLine.Size = UDim2.new(1, 0, 0, 2)
+		topLine.BackgroundColor3 = ACCENT
+		topLine.BorderSizePixel = 0
+		topLine.ZIndex = 11
+		topLine.Parent = panel
 
-	local title = Instance.new("TextLabel")
-	title.BackgroundTransparency = 1
-	title.Position = UDim2.fromOffset(14, 10)
-	title.Size = UDim2.new(1, -56, 0, 20)
-	title.Font = KFONT
-	title.TextSize = 14
-	title.TextXAlignment = Enum.TextXAlignment.Left
-	title.TextColor3 = TEXT
-	title.Text = "OUL  -  Enter Key"
-	title.ZIndex = 11
-	title.Parent = panel
+		local title = Instance.new("TextLabel")
+		title.BackgroundTransparency = 1
+		title.Position = UDim2.fromOffset(14, 10)
+		title.Size = UDim2.new(1, -56, 0, 20)
+		title.Font = KFONT
+		title.TextSize = 14
+		title.TextXAlignment = Enum.TextXAlignment.Left
+		title.TextColor3 = TEXT
+		title.Text = "OUL  -  Enter Key"
+		title.ZIndex = 11
+		title.Parent = panel
 
-	local closeBtn = Instance.new("TextButton")
-	closeBtn.AnchorPoint = Vector2.new(1, 0)
-	closeBtn.Position = UDim2.new(1, -8, 0, 8)
-	closeBtn.Size = UDim2.fromOffset(24, 24)
-	closeBtn.BackgroundTransparency = 1
-	closeBtn.BorderSizePixel = 0
-	closeBtn.AutoButtonColor = false
-	closeBtn.Font = KFONT
-	closeBtn.TextSize = 14
-	closeBtn.Text = "X"
-	closeBtn.TextColor3 = DIM
-	closeBtn.ZIndex = 12
-	closeBtn.Parent = panel
-	Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 4)
-	closeBtn.MouseEnter:Connect(function()
-		closeBtn.TextColor3 = BAD
-	end)
-	closeBtn.MouseLeave:Connect(function()
+		local closeBtn = Instance.new("TextButton")
+		closeBtn.AnchorPoint = Vector2.new(1, 0)
+		closeBtn.Position = UDim2.new(1, -8, 0, 8)
+		closeBtn.Size = UDim2.fromOffset(24, 24)
+		closeBtn.BackgroundTransparency = 1
+		closeBtn.BorderSizePixel = 0
+		closeBtn.AutoButtonColor = false
+		closeBtn.Font = KFONT
+		closeBtn.TextSize = 14
+		closeBtn.Text = "X"
 		closeBtn.TextColor3 = DIM
-	end)
+		closeBtn.ZIndex = 12
+		closeBtn.Parent = panel
+		Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 4)
+		closeBtn.MouseEnter:Connect(function()
+			closeBtn.TextColor3 = BAD
+		end)
+		closeBtn.MouseLeave:Connect(function()
+			closeBtn.TextColor3 = DIM
+		end)
 
-	local box = Instance.new("TextBox")
-	box.Position = UDim2.fromOffset(14, 62)
-	box.Size = UDim2.new(1, -28, 0, 30)
-	box.BackgroundColor3 = FIELD
-	box.BorderSizePixel = 0
-	box.ClearTextOnFocus = false
-	box.PlaceholderText = ""
-	box.PlaceholderColor3 = DIM
-	box.Text = ""
-	box.TextColor3 = TEXT
-	box.Font = KFONT
-	box.TextSize = 13
-	box.ZIndex = 11
-	box.Parent = panel
-	Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
-	local bStroke = Instance.new("UIStroke")
-	bStroke.Color = OUTLINE
-	bStroke.Thickness = 1
-	bStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	bStroke.Parent = box
+		local box = Instance.new("TextBox")
+		box.Position = UDim2.fromOffset(14, 62)
+		box.Size = UDim2.new(1, -28, 0, 30)
+		box.BackgroundColor3 = FIELD
+		box.BorderSizePixel = 0
+		box.ClearTextOnFocus = false
+		box.PlaceholderText = ""
+		box.PlaceholderColor3 = DIM
+		box.Text = ""
+		box.TextColor3 = TEXT
+		box.Font = KFONT
+		box.TextSize = 13
+		box.ZIndex = 11
+		box.Parent = panel
+		Instance.new("UICorner", box).CornerRadius = UDim.new(0, 4)
+		local bStroke = Instance.new("UIStroke")
+		bStroke.Color = OUTLINE
+		bStroke.Thickness = 1
+		bStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		bStroke.Parent = box
 
-	local status = Instance.new("TextLabel")
-	status.BackgroundTransparency = 1
-	status.Position = UDim2.fromOffset(14, 96)
-	status.Size = UDim2.new(1, -28, 0, 14)
-	status.Font = KFONT
-	status.TextSize = 11
-	status.TextXAlignment = Enum.TextXAlignment.Left
-	status.TextColor3 = DIM
-	status.Text = ""
-	status.ZIndex = 11
-	status.Parent = panel
+		local status = Instance.new("TextLabel")
+		status.BackgroundTransparency = 1
+		status.Position = UDim2.fromOffset(14, 96)
+		status.Size = UDim2.new(1, -28, 0, 14)
+		status.Font = KFONT
+		status.TextSize = 11
+		status.TextXAlignment = Enum.TextXAlignment.Left
+		status.TextColor3 = DIM
+		status.Text = ""
+		status.ZIndex = 11
+		status.Parent = panel
 
-	local submit = Instance.new("TextButton")
-	submit.Position = UDim2.fromOffset(14, 120)
-	submit.Size = UDim2.new(1, -28, 0, 32)
-	submit.BackgroundColor3 = ACCENT
-	submit.BorderSizePixel = 0
-	submit.AutoButtonColor = false
-	submit.Font = KFONT
-	submit.TextSize = 13
-	submit.Text = "Submit"
-	submit.TextColor3 = Color3.fromRGB(255, 255, 255)
-	submit.ZIndex = 11
-	submit.Parent = panel
-	Instance.new("UICorner", submit).CornerRadius = UDim.new(0, 4)
-	submit.MouseEnter:Connect(function()
-		if os.clock() >= cooldownUntil then
-			submit.BackgroundColor3 = ACCENT:Lerp(Color3.fromRGB(255, 255, 255), 0.15)
-		end
-	end)
-	submit.MouseLeave:Connect(function()
-		if os.clock() >= cooldownUntil then submit.BackgroundColor3 = ACCENT end
-	end)
-
-	-- drag the window by its top area
-	do
-		local dragging, dragStart, startPos
-		panel.InputBegan:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1 then
-				local rel = input.Position.Y - panel.AbsolutePosition.Y
-				if rel <= 36 then
-					dragging, dragStart, startPos = true, input.Position, panel.Position
-				end
+		local submit = Instance.new("TextButton")
+		submit.Position = UDim2.fromOffset(14, 120)
+		submit.Size = UDim2.new(1, -28, 0, 32)
+		submit.BackgroundColor3 = ACCENT
+		submit.BorderSizePixel = 0
+		submit.AutoButtonColor = false
+		submit.Font = KFONT
+		submit.TextSize = 13
+		submit.Text = "Submit"
+		submit.TextColor3 = Color3.fromRGB(255, 255, 255)
+		submit.ZIndex = 11
+		submit.Parent = panel
+		Instance.new("UICorner", submit).CornerRadius = UDim.new(0, 4)
+		submit.MouseEnter:Connect(function()
+			if os.clock() >= cooldownUntil then
+				submit.BackgroundColor3 = ACCENT:Lerp(Color3.fromRGB(255, 255, 255), 0.15)
 			end
 		end)
-		UserInputService.InputChanged:Connect(function(input)
-			if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-				local d = input.Position - dragStart
-				panel.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
-			end
+		submit.MouseLeave:Connect(function()
+			if os.clock() >= cooldownUntil then submit.BackgroundColor3 = ACCENT end
 		end)
-		UserInputService.InputEnded:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
-		end)
-	end
 
-	local result = nil -- true = unlocked, false = closed
-	local busy = false
-	local COOLDOWN = 3 -- seconds to wait after a wrong key
-
-	local function shake()
-		local base = panel.Position
-		for _, dx in ipairs({ 8, -8, 5, -5, 2, 0 }) do
-			panel.Position = UDim2.new(base.X.Scale, base.X.Offset + dx, base.Y.Scale, base.Y.Offset)
-			task.wait(0.035)
-		end
-	end
-
-	local function attempt()
-		if busy or result ~= nil then return end
-		if os.clock() < cooldownUntil then return end -- still on cooldown
-		busy = true
-		if isValidKey(box.Text) then
-			status.TextColor3 = GOOD
-			status.Text = "key accepted - loading..."
-			bStroke.Color = GOOD
-			task.wait(0.4)
-			result = true
-		else
-			cooldownUntil = os.clock() + COOLDOWN
-			status.TextColor3 = BAD
-			bStroke.Color = BAD
-			submit.BackgroundColor3 = ACCENT:Lerp(BG, 0.6)
-			task.spawn(function()
-				while result == nil do
-					local left = cooldownUntil - os.clock()
-					if left <= 0 then break end
-					status.Text = string.format("wrong key - wait %.1fs", left)
-					task.wait(0.1)
-				end
-				if result == nil then
-					status.Text = ""
-					bStroke.Color = OUTLINE
-					submit.BackgroundColor3 = ACCENT
+		-- drag the window by its top area
+		do
+			local dragging, dragStart, startPos
+			panel.InputBegan:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.MouseButton1 then
+					local rel = input.Position.Y - panel.AbsolutePosition.Y
+					if rel <= 36 then
+						dragging, dragStart, startPos = true, input.Position, panel.Position
+					end
 				end
 			end)
-			shake()
+			UserInputService.InputChanged:Connect(function(input)
+				if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+					local d = input.Position - dragStart
+					panel.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+				end
+			end)
+			UserInputService.InputEnded:Connect(function(input)
+				if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+			end)
 		end
-		busy = false
-	end
 
-	submit.MouseButton1Click:Connect(attempt)
-	box.FocusLost:Connect(function(enterPressed)
-		if enterPressed then attempt() end
-	end)
-	closeBtn.MouseButton1Click:Connect(function()
-		if result == nil then result = false end
-	end)
+		local result = nil -- true = unlocked, false = closed
+		local busy = false
+		local COOLDOWN = 3 -- seconds to wait after a wrong key
 
-	-- wait here until the player unlocks or closes the box
-	while result == nil do
-		task.wait(0.1)
-	end
+		local function shake()
+			local base = panel.Position
+			for _, dx in ipairs({ 8, -8, 5, -5, 2, 0 }) do
+				panel.Position = UDim2.new(base.X.Scale, base.X.Offset + dx, base.Y.Scale, base.Y.Offset)
+				task.wait(0.035)
+			end
+		end
 
-	local function fadeKeyBlur()
-		pcall(function()
-			TweenService:Create(keyBlur, TweenInfo.new(0.25), { Size = 0 }):Play()
-			task.delay(0.3, function() pcall(function() keyBlur:Destroy() end) end)
+		local function attempt()
+			if busy or result ~= nil then return end
+			if os.clock() < cooldownUntil then return end -- still on cooldown
+			busy = true
+			if isValidKey(box.Text) then
+				status.TextColor3 = GOOD
+				saveRemembered(box.Text)
+				status.Text = "key accepted - loading..."
+				bStroke.Color = GOOD
+				task.wait(0.4)
+				result = true
+			else
+				cooldownUntil = os.clock() + COOLDOWN
+				status.TextColor3 = BAD
+				bStroke.Color = BAD
+				submit.BackgroundColor3 = ACCENT:Lerp(BG, 0.6)
+				task.spawn(function()
+					while result == nil do
+						local left = cooldownUntil - os.clock()
+						if left <= 0 then break end
+						status.Text = string.format("wrong key - wait %.1fs", left)
+						task.wait(0.1)
+					end
+					if result == nil then
+						status.Text = ""
+						bStroke.Color = OUTLINE
+						submit.BackgroundColor3 = ACCENT
+					end
+				end)
+				shake()
+			end
+			busy = false
+		end
+
+		submit.MouseButton1Click:Connect(attempt)
+		box.FocusLost:Connect(function(enterPressed)
+			if enterPressed then attempt() end
 		end)
-	end
+		closeBtn.MouseButton1Click:Connect(function()
+			if result == nil then result = false end
+		end)
 
-	if result ~= true then
+		-- wait here until the player unlocks or closes the box
+		while result == nil do
+			task.wait(0.1)
+		end
+
+		local function fadeKeyBlur()
+			pcall(function()
+				TweenService:Create(keyBlur, TweenInfo.new(0.25), { Size = 0 }):Play()
+				task.delay(0.3, function() pcall(function() keyBlur:Destroy() end) end)
+			end)
+		end
+
+		if result ~= true then
+			pcall(function() keyGui:Destroy() end)
+			fadeKeyBlur()
+			return -- closed without a key: the script does not load
+		end
+
+		-- key accepted: the loading screen covers the key box, then the key box goes away
+		Loader.cur = Loader.create()
+		Loader.step(0.3, "Checking key")
 		pcall(function() keyGui:Destroy() end)
 		fadeKeyBlur()
-		return -- closed without a key: the script does not load
-	end
-
-	-- key accepted: the loading screen covers the key box, then the key box goes away
-	Loader.cur = Loader.create()
-	Loader.step(0.3, "Checking key")
-	pcall(function() keyGui:Destroy() end)
-	fadeKeyBlur()
-	Loader.step(0.7, "Unlocking")
-	Loader.step(1, "Key accepted")
-	task.wait(0.15)
-	Loader.cur.reset("Starting")
+		Loader.step(0.7, "Unlocking")
+		Loader.step(1, "Key accepted")
+		task.wait(0.15)
+		Loader.cur.reset("Starting")
+	end -- remembered / key box
 end
 -- ========================== END KEY SYSTEM ==========================
 
@@ -1013,6 +1026,11 @@ local Settings = {
 	RadarLineThickness = 1,
 	UITransparency = 0,
 	UIScale = 100,
+	BGGradient = true,
+	BGGradMirror = true,
+	BGGradBright = 70,
+	BGGradHue = 213,
+	BGGradDir = "TopRight",
 	Fly = false,
 	FlySpeed = 60,
 	FlyVortex = false,
@@ -1159,6 +1177,7 @@ local ESPColors = {
 	Sky = Color3.fromRGB(90, 140, 255),
 	Radar = Color3.fromRGB(255, 70, 70),
 	RadarLines = Color3.fromRGB(255, 255, 255),
+	BGGrad = Color3.fromRGB(0, 110, 255),
 }
 
 local FOVColor = Color3.fromRGB(255, 255, 255)
@@ -1192,6 +1211,7 @@ local ConfigAPI = {
 		["Sky Colour"] = function() return ESPColors.Sky end,
 		["Radar"] = function() return ESPColors.Radar end,
 		["Radar Lines"] = function() return ESPColors.RadarLines end,
+		["Gradient Colour"] = function() return ESPColors.BGGrad end,
 		["Tracers"] = function() return ESPColors.Tracer end,
 		["Usernames"] = function() return ESPColors.Name end,
 		["Checkbox"] = function() return Theme.Switch end,
@@ -1212,7 +1232,7 @@ local SAVE_BOOLS = {
 	"Enabled", "IgnoreFOV", "TeamCheck", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
 	"Boxes", "BoxFill", "Skeleton", "ESPHealth", "Skybox", "SkyRainbow", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed", "Fullbright", "NoFog", "Radar", "Prediction",
 	"InfiniteJump", "Notifications", "TargetNPCs", "ESPNPCs", "MouseTP", "KeybindList", "Ragebot",
-	"RageBehind", "RageAbove", "RageBelow", "RageOrbit", "MouseAim", "VoidRoam",
+	"RageBehind", "RageAbove", "RageBelow", "RageOrbit", "MouseAim", "VoidRoam", "BGGradient", "BGGradMirror",
 }
 local SAVE_NUMBERS = {
 	RadarRange = { 50, 1000 },
@@ -1221,13 +1241,15 @@ local SAVE_NUMBERS = {
 	RadarX = { -1, 10000 },
 	RadarY = { -1, 10000 },
 	RadarLineThickness = { 1, 4 },
-	FOV = { 20, 500 }, Strength = { 1, 500 }, PredictionMs = { 0, 500 }, TriggerDelay = { 0, 300 },
+	BGGradBright = { 10, 100 },
+	BGGradHue = { 0, 360 },
+	FOV ={ 20, 500 }, Strength = { 1, 500 }, PredictionMs = { 0, 500 }, TriggerDelay = { 0, 300 },
 	BlurAmount = { 1, 56 }, UITransparency = { 0, 70 }, UIScale = { 50, 150 }, FlySpeed = { 5, 1000 },
 	VortexSpeed = { 1, 100 }, VortexRadius = { 2, 60 }, SpeedValue = { 16, 250 },
 	RageDistance = { 2, 20 }, OrbitSpeed = { 1, 30 }, VoidInterval = { 10, 2000 }, VoidDistance = { 1, 10000000 }, VoidRoamMs = { 10, 2000 }, AttackInterval = { 10, 2000 }, AttackHeight = { 0, 50 }, SkyBrightness = { 0, 100 }, MouseGain = { 5, 100 },
 }
 local SAVE_THEME = { "Text", "Switch", "Accent", "Background", "Outline" }
-local SAVE_ESP = { "Fill", "Outline", "Tracer", "Name", "Box", "BoxFill", "Skeleton", "Sky", "Radar", "RadarLines" }
+local SAVE_ESP = { "Fill", "Outline", "Tracer", "Name", "Box", "BoxFill", "Skeleton", "Sky", "Radar", "RadarLines", "BGGrad" }
 
 local function colorToArr(c)
 	return { math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5) }
@@ -1270,6 +1292,7 @@ local function takeSnapshot()
 	snap.settings.RageMode = Settings.RageMode
 	snap.settings.RageTarget = Settings.RageTarget
 	snap.settings.UIStyle = Settings.UIStyle
+	snap.settings.BGGradDir = Settings.BGGradDir
 	for _, k in ipairs(SAVE_THEME) do
 		snap.theme[k] = colorToArr(Theme[k])
 	end
@@ -1305,6 +1328,10 @@ local function applySaved(d)
 	if type(s.RageTarget) == "string" then Settings.RageTarget = s.RageTarget:sub(1, 24) end
 	if s.UIStyle == "Classic" or s.UIStyle == "Basic" or s.UIStyle == "Modern" then
 		Settings.UIStyle = s.UIStyle
+	end
+	do
+		local dirs = { TopLeft = true, Top = true, TopRight = true, Right = true, BottomRight = true, Bottom = true, BottomLeft = true, Left = true }
+		if type(s.BGGradDir) == "string" and dirs[s.BGGradDir] then Settings.BGGradDir = s.BGGradDir end
 	end
 
 	if type(d.v) == "number" and d.v >= SAVE_VERSION then
@@ -1636,6 +1663,7 @@ if ConfigAPI.available then
 	end
 end
 end
+
 
 Loader.step(0.25, "Loading settings")
 local CORPSE_WORDS = { "ragdoll", "corpse", "dead", "bodies", "debris", "gib" }
@@ -2084,10 +2112,10 @@ local function applyTag(plr, char)
 	lbl.Size = UDim2.new(1, 0, 1, 0)
 	lbl.BackgroundTransparency = 1
 	lbl.Text = plr.Name
-	lbl.Font = Enum.Font.GothamBold
-	lbl.TextSize = 14
+	lbl.Font = Enum.Font.Code
+	lbl.TextSize = 13
 	lbl.TextColor3 = ESPColors.Name
-	lbl.TextStrokeTransparency = 0.4
+	lbl.TextStrokeTransparency = 0
 	lbl.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 	lbl.Parent = tag
 
@@ -2349,7 +2377,7 @@ local function newLabel(parent, text, size, dim)
 end
 
 local SIDE_W = 96
-local PANEL_W = SIDE_W + 440
+local PANEL_W = SIDE_W + 600
 local TITLE_H = 38
 local TAB_ROW = 30
 local PAGE_X = SIDE_W + 8
@@ -2384,6 +2412,67 @@ outline(panel, nil, 0.45)
 ConfigAPI.uiScale = Instance.new("UIScale")
 ConfigAPI.uiScale.Scale = Settings.UIScale / 100
 ConfigAPI.uiScale.Parent = panel
+
+-- ===== background gradient =====
+-- Two layers sit behind the whole menu: a colour gradient along the chosen direction,
+-- and a black shade gradient across it so the corners fall off to black.
+do
+	local DIR_ROT = {
+		Left = 0, TopLeft = 45, Top = 90, TopRight = 135,
+		Right = 180, BottomRight = 225, Bottom = 270, BottomLeft = 315,
+	}
+
+	local holder = Instance.new("Frame")
+	holder.Name = "OULBgGradient"
+	holder.Size = UDim2.fromScale(1, 1)
+	holder.BackgroundTransparency = 1
+	holder.BorderSizePixel = 0
+	holder.ZIndex = 0
+	holder.Parent = panel
+
+	local base = Instance.new("Frame")
+	base.Size = UDim2.fromScale(1, 1)
+	base.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+	base.BorderSizePixel = 0
+	base.ZIndex = 1
+	base.Parent = holder
+	local baseGrad = Instance.new("UIGradient")
+	baseGrad.Parent = base
+
+	local shade = Instance.new("Frame")
+	shade.Size = UDim2.fromScale(1, 1)
+	shade.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	shade.BorderSizePixel = 0
+	shade.ZIndex = 2
+	shade.Parent = holder
+	local shadeGrad = Instance.new("UIGradient")
+	shadeGrad.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.05),
+		NumberSequenceKeypoint.new(0.5, 1),
+		NumberSequenceKeypoint.new(1, 0.05),
+	})
+	shadeGrad.Parent = shade
+
+	-- full = also re-tween the group cards (they turn see-through while the gradient is on)
+	ConfigAPI.updateBG = function(full)
+		holder.Visible = Settings.BGGradient
+		local black = Color3.fromRGB(0, 0, 0)
+		local c = ESPColors.BGGrad:Lerp(black, 1 - Settings.BGGradBright / 100)
+		local mid = c:Lerp(black, 0.6)
+		local last = Settings.BGGradMirror and c or black
+		baseGrad.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, c),
+			ColorSequenceKeypoint.new(0.5, mid),
+			ColorSequenceKeypoint.new(1, last),
+		})
+		local rot = DIR_ROT[Settings.BGGradDir] or 135
+		baseGrad.Rotation = rot
+		shadeGrad.Rotation = rot + 90
+		if full then applyTheme() end
+	end
+	ConfigAPI.updateBG(false)
+end
+-- ===== end background gradient =====
 
 do
 local topLine = Instance.new("Frame")
@@ -2747,7 +2836,7 @@ toastHolder.Name = "Toasts"
 toastHolder.BackgroundTransparency = 1
 toastHolder.AnchorPoint = Vector2.new(1, 1)
 toastHolder.Position = UDim2.new(1, -14, 1, -14)
-toastHolder.Size = UDim2.fromOffset(210, 260)
+toastHolder.Size = UDim2.fromOffset(270, 260)
 toastHolder.ZIndex = 200
 toastHolder.Parent = gui
 do
@@ -2765,7 +2854,8 @@ local toastList = {}
 toast = function(richText)
 	toastOrder += 1
 	local t = Instance.new("CanvasGroup")
-	t.Size = UDim2.fromOffset(200, 26)
+	t.Size = UDim2.fromOffset(260, 0)
+	t.AutomaticSize = Enum.AutomaticSize.Y -- grows taller for long messages instead of cutting them off
 	t.BorderSizePixel = 0
 	t.GroupTransparency = 1
 	t.LayoutOrder = toastOrder
@@ -2782,7 +2872,9 @@ toast = function(richText)
 
 	local l = Instance.new("TextLabel")
 	l.BackgroundTransparency = 1
-	l.Size = UDim2.new(1, 0, 1, 0)
+	l.Size = UDim2.new(1, 0, 0, 16)
+	l.AutomaticSize = Enum.AutomaticSize.Y
+	l.TextWrapped = true
 	l.Font = FONT
 	l.TextSize = 12
 	l.RichText = true
@@ -2790,6 +2882,14 @@ toast = function(richText)
 	l.ZIndex = 201
 	l.Parent = t
 	themeText(l)
+	do
+		local tp = Instance.new("UIPadding")
+		tp.PaddingLeft = UDim.new(0, 8)
+		tp.PaddingRight = UDim.new(0, 8)
+		tp.PaddingTop = UDim.new(0, 5)
+		tp.PaddingBottom = UDim.new(0, 5)
+		tp.Parent = t
+	end
 
 	toastList[#toastList + 1] = t
 	while #toastList > 5 do
@@ -2942,6 +3042,9 @@ local function newGroup(page, colIndex, titleText)
 	g.Parent = col
 	bind(g, "BackgroundColor3", function()
 		return Theme.Group
+	end)
+	bind(g, "BackgroundTransparency", function()
+		return Settings.BGGradient and 0.4 or 0
 	end)
 	corner(g, 4)
 	outline(g, nil, 0.72)
@@ -3673,9 +3776,24 @@ local function refreshTabs(animate)
 	end
 end
 
+-- Basic style stacks the two columns on top of each other. If that would be taller than the
+-- screen, it widens out into two side-by-side columns instead (like Classic) so it fits.
+local function useStacked(p)
+	if Settings.UIStyle ~= "Basic" then return false end
+	local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
+	if not vp then return true end
+	local stackedH = 8 * (#p.cols - 1)
+	for _, c in ipairs(p.cols) do
+		stackedH = stackedH + c.layout.AbsoluteContentSize.Y
+	end
+	local _, py = pageOrigin()
+	local total = py + p.subOffset + stackedH + FOOTER_H + 8
+	return total * (Settings.UIScale / 100) <= vp.Y - 20
+end
+
 local function pageHeight(p)
 	local h = 0
-	if Settings.UIStyle == "Basic" then
+	if useStacked(p) then
 		for _, c in ipairs(p.cols) do
 			h = h + c.layout.AbsoluteContentSize.Y
 		end
@@ -3689,10 +3807,9 @@ end
 
 updateSize = function(animate)
 	local px, py = pageOrigin()
-	local stacked = Settings.UIStyle == "Basic"
 	for _, p in pairs(pages) do
 		local c1, c2 = p.cols[1].frame, p.cols[2] and p.cols[2].frame
-		if stacked then
+		if useStacked(p) then
 			c1.Size = UDim2.new(1, 0, 0, 0)
 			c1.Position = UDim2.new(0, 0, 0, 0)
 			if c2 then
@@ -3719,6 +3836,15 @@ updateSize = function(animate)
 		tween(panel, { Size = target }, SLIDE)
 	else
 		panel.Size = target
+	end
+
+	-- keep the bottom of the menu on screen after it changes size
+	local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
+	if vp then
+		local maxY = math.max(0, vp.Y - target.Y.Offset * (Settings.UIScale / 100))
+		if panel.Position.Y.Offset > maxY then
+			panel.Position = UDim2.fromOffset(panel.Position.X.Offset, maxY)
+		end
 	end
 end
 
@@ -4674,6 +4800,7 @@ do
 	end)
 	saveStatusLabel = addNote(u, saveStatusText)
 
+
 	local switchDefault = Theme.Switch
 	local accentDefault = Theme.Accent
 	local textDefault = Theme.Text
@@ -4700,6 +4827,109 @@ do
 		Theme.Outline = color
 		applyTheme()
 	end, outlineDefault, 0.45, 0.6)
+
+	local bg = newGroup(settingsPage, 2, "Background")
+	addCheckbox(bg, "Gradient", "BGGradient", function() ConfigAPI.updateBG(true) end)
+	addCheckbox(bg, "Both corners", "BGGradMirror", function() ConfigAPI.updateBG(false) end)
+	-- black / grey / white up front, then the usual colours
+	local bgPalette = {
+		Color3.fromRGB(0, 0, 0),
+		Color3.fromRGB(128, 128, 128),
+		Color3.fromRGB(255, 255, 255),
+		ESPColors.BGGrad,
+	}
+	for i = 2, 13 do
+		bgPalette[#bgPalette + 1] = PALETTE[i]
+	end
+	addColor(bg, "Gradient Colour", bgPalette, function(color)
+		ESPColors.BGGrad = color
+		local h, s = color:ToHSV()
+		if s > 0.1 then
+			Settings.BGGradHue = math.floor(h * 360 + 0.5) % 361
+			if refreshers.BGGradHue then refreshers.BGGradHue() end
+		end
+		ConfigAPI.updateBG(false)
+	end, ESPColors.BGGrad)
+
+	-- hue slider: sets the gradient colour directly (the swatches above still work too)
+	do
+		local syncing = true
+		addSlider(bg, "Hue", 0, 360, "BGGradHue", function(v)
+			if syncing then return end
+			ESPColors.BGGrad = Color3.fromHSV(math.min(v, 359.9) / 360, 0.9, 1)
+			for _, fn in ipairs(ConfigAPI.colorRefreshers) do pcall(fn) end
+			ConfigAPI.updateBG(false)
+		end)
+		local inner = refreshers.BGGradHue
+		refreshers.BGGradHue = function(...)
+			syncing = true
+			inner(...)
+			syncing = false
+		end
+		syncing = false
+	end
+	addSlider(bg, "Brightness (%)", 10, 100, "BGGradBright", function()
+		ConfigAPI.updateBG(false)
+	end)
+	addNote(bg, "Direction (where it comes from)")
+	do
+		local grid = Instance.new("Frame")
+		grid.Size = UDim2.new(1, 0, 0, 74)
+		grid.BackgroundTransparency = 1
+		grid.LayoutOrder = nextOrder(bg)
+		grid.Parent = bg
+		local gl = Instance.new("UIGridLayout")
+		gl.CellSize = UDim2.new(1 / 3, -4, 0, 22)
+		gl.CellPadding = UDim2.fromOffset(6, 4)
+		gl.SortOrder = Enum.SortOrder.LayoutOrder
+		gl.Parent = grid
+
+		local cells = {
+			{ id = "TopLeft", label = "TL" }, { id = "Top", label = "Top" }, { id = "TopRight", label = "TR" },
+			{ id = "Left", label = "Left" }, { id = nil }, { id = "Right", label = "Right" },
+			{ id = "BottomLeft", label = "BL" }, { id = "Bottom", label = "Bot" }, { id = "BottomRight", label = "BR" },
+		}
+		local buttons = {}
+		local function refresh(animate)
+			for id, btn in pairs(buttons) do
+				apply(btn, {
+					BackgroundTransparency = (Settings.BGGradDir == id) and 0 or 1,
+					TextColor3 = (Settings.BGGradDir == id) and Color3.fromRGB(255, 255, 255) or Theme.Dim,
+				}, animate)
+			end
+		end
+		for i, cell in ipairs(cells) do
+			if cell.id then
+				local btn = Instance.new("TextButton")
+				btn.LayoutOrder = i
+				btn.BorderSizePixel = 0
+				btn.AutoButtonColor = false
+				btn.Font = FONT
+				btn.TextSize = 12
+				btn.Text = cell.label
+				btn.Parent = grid
+				bind(btn, "BackgroundColor3", function() return Theme.Accent end)
+				corner(btn, 3)
+				outline(btn, 0.4)
+				buttons[cell.id] = btn
+				btn.MouseButton1Click:Connect(function()
+					Settings.BGGradDir = cell.id
+					ConfigAPI.updateBG(false)
+					refresh(true)
+				end)
+			else
+				local blank = Instance.new("Frame")
+				blank.LayoutOrder = i
+				blank.BackgroundTransparency = 1
+				blank.Parent = grid
+			end
+		end
+		onTheme(function() refresh(true) end)
+		refreshers.BGGradDir = refresh
+		refresh(false)
+	end
+	addNote(bg, "Both corners: bright at the")
+	addNote(bg, "chosen corner and the opposite")
 end
 
 do
@@ -4858,6 +5088,7 @@ do
 		setChamOutlineColor(ESPColors.Outline)
 		setNameColor(ESPColors.Name)
 		circleStroke.Color = FOVColor
+		pcall(ConfigAPI.updateBG, false)
 		applyTheme()
 		for _, fn in ipairs(ConfigAPI.colorRefreshers) do pcall(fn) end
 		hud.Visible = Settings.Watermark
