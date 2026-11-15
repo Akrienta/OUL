@@ -285,7 +285,7 @@ end
 local Loader = { cur = nil }
 
 function Loader.create()
-	local DIM_AMOUNT = 0.45 -- 0 = no dimming, 1 = fully black
+	local DIM_AMOUNT = 0.2 -- lower = darker (0 = black, 1 = no dimming)
 	local BLUR_SIZE = 8 -- lower = sharper background
 	local TEXT = Color3.fromRGB(215, 228, 245)
 	local DIM = Color3.fromRGB(110, 150, 190)
@@ -584,7 +584,7 @@ do
 	dim.BorderSizePixel = 0
 	dim.ZIndex = 1
 	dim.Parent = keyGui
-	TweenService:Create(dim, TweenInfo.new(0.3), { BackgroundTransparency = 0.45 }):Play()
+	TweenService:Create(dim, TweenInfo.new(0.3), { BackgroundTransparency = 0.2 }):Play()
 
 	local panel = Instance.new("Frame")
 	panel.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -965,6 +965,9 @@ local Settings = {
 	ESPHealth = false,
 	Skybox = false,
 	SkyRainbow = false,
+	SkyBrightness = 100,
+	MouseAim = true,
+	MouseGain = 25,
 	WallCheck = true,
 	Watermark = true,
 	ShowFOV = true,
@@ -1175,7 +1178,7 @@ local SAVE_BOOLS = {
 	"Enabled", "IgnoreFOV", "TeamCheck", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
 	"Boxes", "BoxFill", "Skeleton", "ESPHealth", "Skybox", "SkyRainbow", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed", "Fullbright", "NoFog", "Radar", "Prediction",
 	"InfiniteJump", "Notifications", "TargetNPCs", "ESPNPCs", "MouseTP", "KeybindList", "Ragebot",
-	"RageBehind", "RageAbove", "RageBelow", "RageOrbit",
+	"RageBehind", "RageAbove", "RageBelow", "RageOrbit", "MouseAim",
 }
 local SAVE_NUMBERS = {
 	RadarRange = { 50, 1000 },
@@ -1187,7 +1190,7 @@ local SAVE_NUMBERS = {
 	FOV = { 20, 500 }, Strength = { 1, 500 }, PredictionMs = { 0, 500 }, TriggerDelay = { 0, 300 },
 	BlurAmount = { 1, 56 }, UITransparency = { 0, 70 }, UIScale = { 50, 150 }, FlySpeed = { 5, 1000 },
 	VortexSpeed = { 1, 100 }, VortexRadius = { 2, 60 }, SpeedValue = { 16, 250 },
-	RageDistance = { 2, 20 }, OrbitSpeed = { 1, 30 },
+	RageDistance = { 2, 20 }, OrbitSpeed = { 1, 30 }, SkyBrightness = { 0, 100 }, MouseGain = { 5, 100 },
 }
 local SAVE_THEME = { "Text", "Switch", "Accent", "Background", "Outline" }
 local SAVE_ESP = { "Fill", "Outline", "Tracer", "Name", "Box", "BoxFill", "Skeleton", "Sky", "Radar", "RadarLines" }
@@ -3918,6 +3921,8 @@ do
 	addCheckbox(g, "Prediction", "Prediction")
 	addSlider(g, "Prediction (ms)", 0, 500, "PredictionMs")
 	addSegment(g, "Target", "AimPart", "Head", "Body")
+	addCheckbox(g, "Real mouse input", "MouseAim")
+	addSlider(g, "Mouse gain (%)", 5, 100, "MouseGain")
 	addSegment(g, "Key mode", "AimMode", "Hold", "Toggle", function()
 		Settings.Holding = false
 		updateKeyHints()
@@ -3943,6 +3948,9 @@ do
 	addNote(info, "strength: 1 = soft pull,")
 	addNote(info, "500 = straight lock")
 	addNote(info, "prediction leads moving")
+	addNote(info, "real mouse input: moves your")
+	addNote(info, "actual mouse (needs mousemoverel)")
+	addNote(info, "overshoots? lower mouse gain")
 	addNote(info, "targets by their speed")
 	addButton(info, "Print team info", Color3.fromRGB(70, 90, 140), Color3.fromRGB(90, 112, 170), function()
 		if printTeamInfo then printTeamInfo() end
@@ -4261,15 +4269,29 @@ do
 	local g = newGroup(skyPage, 1, "Skybox")
 	addCheckbox(g, "Enabled", "Skybox")
 	addCheckbox(g, "Rainbow", "SkyRainbow")
-	addColor(g, "Sky Colour", paletteWith(ESPColors.Sky), function(color)
+	-- palette with black / grey / white up front
+	local skyPalette = {
+		Color3.fromRGB(0, 0, 0),
+		Color3.fromRGB(128, 128, 128),
+		Color3.fromRGB(255, 255, 255),
+		ESPColors.Sky,
+	}
+	for i = 2, 13 do
+		skyPalette[#skyPalette + 1] = PALETTE[i]
+	end
+	addColor(g, "Sky Colour", skyPalette, function(color)
 		ESPColors.Sky = color
 	end, ESPColors.Sky)
+	addSlider(g, "Brightness", 0, 100, "SkyBrightness")
 
 	local info = newGroup(skyPage, 2, "Info")
 	addNote(info, "recolours the whole sky")
 	addNote(info, "hides the game's own sky")
 	addNote(info, "and haze (put back when off)")
 	addNote(info, "rainbow cycles colours")
+	addNote(info, "brightness: 0 = black,")
+	addNote(info, "100 = full colour")
+	addNote(info, "white + brightness = grey")
 	addNote(info, "needs writefile support")
 end
 
@@ -5851,6 +5873,8 @@ do
 			else
 				c = ESPColors.Sky
 			end
+			local br = Settings.SkyBrightness / 100
+			c = Color3.new(c.R * br, c.G * br, c.B * br)
 			local asset, key = skyAsset(c)
 			if asset and key ~= lastKey then
 				lastKey = key
@@ -6544,6 +6568,26 @@ RunService:BindToRenderStep("Aimbot", Enum.RenderPriority.Camera.Value + 1, func
 		if troot then
 			local v = troot.AssemblyLinearVelocity
 			aimPos = aimPos + Vector3.new(v.X, 0, v.Z) * (Settings.PredictionMs / 1000)
+		end
+	end
+
+	-- Real mouse input: instead of writing the camera, push the (OS-level) mouse so the game
+	-- sees genuine mouse movement and the camera turns the normal way.
+	if Settings.MouseAim and type(mousemoverel) == "function" then
+		local sp, onScr = Camera:WorldToViewportPoint(aimPos)
+		if onScr then
+			local vp = Camera.ViewportSize
+			local gain = Settings.MouseGain / 100
+			local ex = (sp.X - vp.X / 2) * alpha * gain
+			local ey = (sp.Y - vp.Y / 2) * alpha * gain
+			-- keep the fractional part so tiny moves are not lost to rounding
+			ex, ey = ex + (ConfigAPI.mouseRemX or 0), ey + (ConfigAPI.mouseRemY or 0)
+			local ix, iy = math.floor(ex + 0.5), math.floor(ey + 0.5)
+			ConfigAPI.mouseRemX, ConfigAPI.mouseRemY = ex - ix, ey - iy
+			if ix ~= 0 or iy ~= 0 then
+				pcall(mousemoverel, ix, iy)
+			end
+			return
 		end
 	end
 
