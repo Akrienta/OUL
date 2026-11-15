@@ -1007,6 +1007,9 @@ local Settings = {
 	RageBelow = false,
 	RageOrbit = false,
 	OrbitSpeed = 6,
+	VoidSpam = false,
+	VoidInterval = 200,
+	AttackInterval = 200,
 	RageMode = "Closest",
 	RageTarget = "",
 }
@@ -1025,7 +1028,7 @@ local DisplayNames = {
 	Watermark = "Watermark", BlurEnabled = "Background Blur", Notifications = "Notifications",
 	TargetNPCs = "Target Zombies/NPCS", ESPNPCs = "Zombie/NPC ESP",
 	MouseTP = "Mouse TP", KeybindList = "Keybind List",
-	Ragebot = "Ragebot", RageOrbit = "Orbit",
+	Ragebot = "Ragebot", RageOrbit = "Orbit", VoidSpam = "Void Spam",
 	Fullbright = "Fullbright", NoFog = "No Fog", Radar = "Radar",
 }
 
@@ -1037,7 +1040,7 @@ defBind("menu", "Menu", "menu", nil, Enum.KeyCode.End)
 defBind("panic", "Panic (unload)", "panic", nil, Enum.KeyCode.Home)
 defBind("aim", "Aim key", "hold", nil, Enum.UserInputType.MouseButton2)
 for _, k in ipairs({
-	"Enabled", "ShowFOV", "IgnoreFOV", "TeamCheck", "Triggerbot", "Ragebot", "ESP", "Chams", "ShowNames", "Tracers", "Boxes",
+	"Enabled", "ShowFOV", "IgnoreFOV", "TeamCheck", "Triggerbot", "Ragebot", "VoidSpam", "ESP", "Chams", "ShowNames", "Tracers", "Boxes",
 	"BoxFill", "Skeleton", "Skybox", "Fly", "Noclip", "Speed", "InfiniteJump", "Watermark", "BlurEnabled", "Notifications", "KeybindList",
 }) do
 	local default
@@ -1190,7 +1193,7 @@ local SAVE_NUMBERS = {
 	FOV = { 20, 500 }, Strength = { 1, 500 }, PredictionMs = { 0, 500 }, TriggerDelay = { 0, 300 },
 	BlurAmount = { 1, 56 }, UITransparency = { 0, 70 }, UIScale = { 50, 150 }, FlySpeed = { 5, 1000 },
 	VortexSpeed = { 1, 100 }, VortexRadius = { 2, 60 }, SpeedValue = { 16, 250 },
-	RageDistance = { 2, 20 }, OrbitSpeed = { 1, 30 }, SkyBrightness = { 0, 100 }, MouseGain = { 5, 100 },
+	RageDistance = { 2, 20 }, OrbitSpeed = { 1, 30 }, VoidInterval = { 10, 2000 }, AttackInterval = { 10, 2000 }, SkyBrightness = { 0, 100 }, MouseGain = { 5, 100 },
 }
 local SAVE_THEME = { "Text", "Switch", "Accent", "Background", "Outline" }
 local SAVE_ESP = { "Fill", "Outline", "Tracer", "Name", "Box", "BoxFill", "Skeleton", "Sky", "Radar", "RadarLines" }
@@ -4087,6 +4090,11 @@ do
 	addCheckbox(g, "Orbit", "RageOrbit")
 	addSlider(g, "Orbit Speed", 1, 30, "OrbitSpeed")
 
+	local vsg = newGroup(ragePage, 1, "Void Spam")
+	addCheckbox(vsg, "Void Spam", "VoidSpam")
+	addSlider(vsg, "Void Interval", 10, 2000, "VoidInterval")
+	addSlider(vsg, "Attack Interval", 10, 2000, "AttackInterval")
+
 	local sel = newGroup(ragePage, 2, "Selected Target")
 
 	local box = Instance.new("TextBox")
@@ -4203,6 +4211,12 @@ do
 	addNote(info, "orbit: spin around them")
 	addNote(info, "(distance = orbit radius)")
 	addNote(info, "uses Team Check")
+	addNote(info, "Void Spam: sits 500k studs")
+	addNote(info, "out, then jumps inside the")
+	addNote(info, "target (Closest / Selected)")
+	addNote(info, "Void Interval: ms in the void")
+	addNote(info, "Attack Interval: ms on target")
+	addNote(info, "pauses normal Rage while on")
 end
 
 do
@@ -4696,7 +4710,7 @@ do
 	end
 
 	local c = newGroup(keyPage, 1, "Combat")
-	for _, id in ipairs({ "aim", "Enabled", "ShowFOV", "IgnoreFOV", "TeamCheck", "Triggerbot", "Ragebot" }) do
+	for _, id in ipairs({ "aim", "Enabled", "ShowFOV", "IgnoreFOV", "TeamCheck", "Triggerbot", "Ragebot", "VoidSpam" }) do
 		addKeybindRow(c, id)
 	end
 
@@ -5427,6 +5441,9 @@ local function playerUnderCrosshair()
 	local hum = model:FindFirstChildOfClass("Humanoid")
 	if not hum or not isAlive(model) then return nil end
 
+	-- never shoot anyone with a forcefield (players or NPCs), whether Team Check is on or not
+	if model:FindFirstChildOfClass("ForceField") then return nil end
+
 	local plr = Players:GetPlayerFromCharacter(model)
 	if plr then
 		if plr ~= LocalPlayer and canDamage(plr) then
@@ -5436,7 +5453,6 @@ local function playerUnderCrosshair()
 	end
 
 	if not Settings.TargetNPCs then return nil end
-	if Settings.TeamCheck and model:FindFirstChildOfClass("ForceField") then return nil end
 	return model
 end
 
@@ -6216,6 +6232,7 @@ local function setRageStatus(text)
 end
 
 track(RunService.Stepped:Connect(function(_, dt)
+	if Settings.VoidSpam then return end -- Void Spam drives the character instead
 	if not Settings.Ragebot then
 		rageTarget = nil
 		setRageStatus("Target: none")
@@ -6272,6 +6289,145 @@ track(RunService.Stepped:Connect(function(_, dt)
 	myRoot.AssemblyLinearVelocity = Vector3.zero
 	myRoot.AssemblyAngularVelocity = Vector3.zero
 end))
+
+-- ============================ VOID SPAM ============================
+-- Cycle: sit at a random point 500,000 studs from 0,0,0 for "Void Interval", then jump
+-- exactly onto the target (nearest / selected, same rules as Rage) for "Attack Interval",
+-- then go back out to a new void point, and repeat.
+-- The void point is kept above the map's kill height and the character is re-placed every
+-- physics step with zero velocity, so it never falls far enough to die.
+do
+	local VOID_DISTANCE = 500000
+	local vs = nil -- active state, nil while off
+
+	local function randomVoidPos()
+		local kill = workspace.FallenPartsDestroyHeight
+		local y = (kill > -math.huge) and (kill + 100) or -400
+		y = math.min(y, 0)
+		local a = math.random() * math.pi * 2
+		return Vector3.new(math.cos(a) * VOID_DISTANCE, y, math.sin(a) * VOID_DISTANCE)
+	end
+
+	local function enter(st, phase)
+		st.phase, st.since = phase, os.clock()
+		if phase == "void" then st.voidPos = randomVoidPos() end
+	end
+
+	local function stop()
+		local st = vs
+		if not st then return end
+		vs = nil
+		-- if switched off while out in the void, bring the character back
+		if st.phase == "void" and st.root and st.root.Parent and st.anchorCF then
+			pcall(function()
+				st.root.CFrame = st.anchorCF + Vector3.new(0, 3, 0)
+				st.root.AssemblyLinearVelocity = Vector3.zero
+				st.root.AssemblyAngularVelocity = Vector3.zero
+			end)
+		end
+		setRageStatus("Target: none")
+	end
+	ConfigAPI.voidSpamRestore = stop
+
+	-- same team check as the aimbot (canDamage: teammates and force-fielded players are skipped)
+	local function targetOk(t)
+		if not (t and t.plr and t.plr.Parent == Players) then return false end
+		local c = t.plr.Character
+		local r = c and c:FindFirstChild("HumanoidRootPart")
+		return r ~= nil and r == t.root and isAlive(c) and canDamage(t.plr)
+	end
+
+	local function pickTarget(st)
+		if Settings.RageMode == "Selected" then
+			-- always the named player (if they are not on your team)
+			local t, why = getRageTarget({ Position = st.anchorPos })
+			if not t then return nil, why end
+			if not canDamage(t.plr) then return nil, t.name .. " (team)" end
+			return t
+		end
+
+		-- Closest: keep the current target until it is dead
+		if targetOk(st.target) then return st.target end
+		st.target = nil
+
+		local best, bestDist
+		for _, plr in ipairs(Players:GetPlayers()) do
+			if plr ~= LocalPlayer then
+				local c = plr.Character
+				local r = c and c:FindFirstChild("HumanoidRootPart")
+				if r and isAlive(c) and canDamage(plr) then
+					local d = (r.Position - st.anchorPos).Magnitude
+					if not bestDist or d < bestDist then
+						best, bestDist = { root = r, name = plr.Name, plr = plr }, d
+					end
+				end
+			end
+		end
+		if not best then return nil, "no target" end
+		return best
+	end
+
+	track(RunService.Stepped:Connect(function()
+		if not Settings.VoidSpam then
+			if vs then stop() end
+			return
+		end
+
+		local char = LocalPlayer.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		if not (hum and root and hum.Health > 0) then
+			vs = nil -- died / respawning: start fresh with the next character
+			return
+		end
+
+		if vs and vs.root ~= root then vs = nil end
+		if not vs then
+			vs = { root = root, anchorCF = root.CFrame, anchorPos = root.Position }
+			enter(vs, "void")
+		end
+		local st = vs
+		local now = os.clock()
+
+		-- time to attack? stay on the current target until it dies, otherwise pick a new one
+		if st.phase == "void" and now - st.since >= Settings.VoidInterval / 1000 then
+			local t, why = pickTarget(st)
+			if t then
+				st.target, st.why = t, nil
+				enter(st, "attack")
+			else
+				st.why = why or "no target"
+				enter(st, "void") -- nobody to hit: hop to a new void point
+			end
+		end
+
+		if st.phase == "attack" then
+			local t = st.target
+			if not targetOk(t) then
+				st.target = nil -- target died / left / became a teammate: pick again next time
+				enter(st, "void")
+			elseif now - st.since >= Settings.AttackInterval / 1000 then
+				enter(st, "void")
+			else
+				-- exactly where the target is, so you are inside them
+				local troot = t.root
+				st.anchorCF, st.anchorPos = troot.CFrame, troot.Position
+				root.CFrame = troot.CFrame
+				root.AssemblyLinearVelocity = Vector3.zero
+				root.AssemblyAngularVelocity = Vector3.zero
+				setRageStatus("Target: " .. t.name)
+				return
+			end
+		end
+
+		-- void phase: hold the character at the void point
+		root.CFrame = CFrame.new(st.voidPos)
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
+		setRageStatus("Void spam: " .. (st.why or "in void"))
+	end))
+end
+-- ========================== END VOID SPAM ==========================
 
 local vortexRestoreAll, vortexRemote
 do
@@ -6751,6 +6907,10 @@ local function cleanup()
 	Settings.Triggerbot = false
 	Settings.Ragebot = false
 	Settings.RageOrbit = false
+	Settings.VoidSpam = false
+	pcall(function()
+		if ConfigAPI.voidSpamRestore then ConfigAPI.voidSpamRestore() end
+	end)
 	Settings.ESP = false
 	Settings.Chams = false
 	Settings.ShowNames = false
