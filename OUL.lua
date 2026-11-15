@@ -1462,6 +1462,78 @@ local function cfgPath(name)
 	return CONFIG_DIR .. "/" .. name .. ".json"
 end
 
+-- ===== share codes (export / import a config as one line of text) =====
+local B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+local B64LOOK = {}
+for i = 1, 64 do B64LOOK[B64:byte(i)] = i - 1 end
+
+local function b64encode(data)
+	local out = {}
+	for i = 1, #data, 3 do
+		local a, b, c = data:byte(i, i + 2)
+		local n = a * 65536 + (b or 0) * 256 + (c or 0)
+		local i1 = math.floor(n / 262144) % 64
+		local i2 = math.floor(n / 4096) % 64
+		local i3 = math.floor(n / 64) % 64
+		local i4 = n % 64
+		out[#out + 1] = B64:sub(i1 + 1, i1 + 1)
+		out[#out + 1] = B64:sub(i2 + 1, i2 + 1)
+		out[#out + 1] = b and B64:sub(i3 + 1, i3 + 1) or "="
+		out[#out + 1] = c and B64:sub(i4 + 1, i4 + 1) or "="
+	end
+	return table.concat(out)
+end
+
+local function b64decode(str)
+	str = string.gsub(str, "[^%w%+/]", "")
+	local out = {}
+	for i = 1, #str, 4 do
+		local c1, c2, c3, c4 = str:byte(i, i + 3)
+		local n1, n2 = B64LOOK[c1], B64LOOK[c2]
+		local n3, n4 = c3 and B64LOOK[c3], c4 and B64LOOK[c4]
+		if not n1 or not n2 then return nil end
+		if (c3 and not n3) or (c4 and not n4) then return nil end
+		local n = n1 * 262144 + n2 * 4096 + (n3 or 0) * 64 + (n4 or 0)
+		out[#out + 1] = string.char(math.floor(n / 65536) % 256)
+		if n3 then out[#out + 1] = string.char(math.floor(n / 256) % 256) end
+		if n4 then out[#out + 1] = string.char(n % 256) end
+	end
+	return table.concat(out)
+end
+
+local SHARE_PREFIX = "OUL1:"
+
+-- Returns a single-line code. Personal things (HUD positions, ragebot target name,
+-- custom radar position) are left out so a friend's layout isn't messed up.
+function ConfigAPI.exportCode()
+	local snap = takeSnapshot()
+	snap.pos = {}
+	snap.settings.RageTarget = nil
+	snap.settings.RadarX, snap.settings.RadarY = nil, nil
+	local ok, enc = pcall(function() return HttpService:JSONEncode(snap) end)
+	if not ok then return nil, enc end
+	return SHARE_PREFIX .. b64encode(enc)
+end
+
+-- Applies a code made by exportCode. Returns true, or false + a reason.
+function ConfigAPI.importCode(code)
+	code = string.gsub(tostring(code or ""), "%s+", "")
+	if #code > 30000 then return false, "code too long" end
+	if code:sub(1, #SHARE_PREFIX) ~= SHARE_PREFIX then return false, "not an OUL code" end
+	local json = b64decode(code:sub(#SHARE_PREFIX + 1))
+	if not json or json == "" then return false, "code is damaged" end
+	local ok, data = pcall(function() return HttpService:JSONDecode(json) end)
+	if not ok or type(data) ~= "table" or type(data.settings) ~= "table" then
+		return false, "code is damaged"
+	end
+	local hudPos, keyPos = Positions.hud, Positions.keylist
+	local okApply, err = pcall(applySaved, data)
+	Positions.hud, Positions.keylist = hudPos, keyPos
+	if not okApply then return false, err end
+	return true
+end
+-- ===== end share codes =====
+
 function ConfigAPI.clean(name)
 	name = tostring(name or "")
 	name = name:gsub("[^%w%-_ ]", ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -4661,6 +4733,24 @@ do
 	local cfgPage = newPage("settings_configs", true)
 	local g = newGroup(cfgPage, 1, "Configs")
 
+	-- pushes the current Settings/Theme values back into every control (used by Load and Import)
+	local function reloadUI()
+		for _, fn in pairs(refreshers) do pcall(fn, true) end
+		setChamColor(ESPColors.Fill)
+		setChamOutlineColor(ESPColors.Outline)
+		setNameColor(ESPColors.Name)
+		circleStroke.Color = FOVColor
+		applyTheme()
+		for _, fn in ipairs(ConfigAPI.colorRefreshers) do pcall(fn) end
+		hud.Visible = Settings.Watermark
+		keyList.Visible = Settings.KeybindList
+		if Positions.hud then hud.Position = Positions.hud end
+		if Positions.keylist then keyList.Position = Positions.keylist end
+		refreshBindUI()
+		updateKeyHints()
+		setESPEnabled()
+	end
+
 	if not ConfigAPI.available then
 		addNote(g, "needs executor file support")
 		addNote(g, "(listfiles, delfile,")
@@ -4668,23 +4758,6 @@ do
 	else
 		local BLUE, BLUE_H = Color3.fromRGB(70, 90, 140), Color3.fromRGB(90, 112, 170)
 		local RED, RED_H = Color3.fromRGB(170, 55, 65), Color3.fromRGB(205, 75, 85)
-
-		local function reloadUI()
-			for _, fn in pairs(refreshers) do pcall(fn, true) end
-			setChamColor(ESPColors.Fill)
-			setChamOutlineColor(ESPColors.Outline)
-			setNameColor(ESPColors.Name)
-			circleStroke.Color = FOVColor
-			applyTheme()
-			for _, fn in ipairs(ConfigAPI.colorRefreshers) do pcall(fn) end
-			hud.Visible = Settings.Watermark
-			keyList.Visible = Settings.KeybindList
-			if Positions.hud then hud.Position = Positions.hud end
-			if Positions.keylist then keyList.Position = Positions.keylist end
-			refreshBindUI()
-			updateKeyHints()
-			setESPEnabled()
-		end
 
 		local list = Instance.new("ScrollingFrame")
 		list.Size = UDim2.new(1, 0, 0, 120)
@@ -4854,6 +4927,75 @@ do
 		addNote(m, "autoload applies on launch")
 
 		rebuild()
+	end
+
+	-- ===== Share Config (works without file support) =====
+	do
+		local BLUE, BLUE_H = Color3.fromRGB(70, 90, 140), Color3.fromRGB(90, 112, 170)
+		local share = newGroup(cfgPage, 1, "Share Config")
+		addNote(share, "Export makes a code to send")
+		addNote(share, "to friends. To use one, paste")
+		addNote(share, "it below and press Import.")
+
+		local codeBox = Instance.new("TextBox")
+		codeBox.Size = UDim2.new(1, 0, 0, 22)
+		codeBox.BorderSizePixel = 0
+		codeBox.ClearTextOnFocus = false
+		codeBox.ClipsDescendants = true
+		codeBox.PlaceholderText = "share code..."
+		codeBox.Text = ""
+		codeBox.Font = FONT
+		codeBox.TextSize = 11
+		codeBox.TextXAlignment = Enum.TextXAlignment.Left
+		codeBox.LayoutOrder = nextOrder(share)
+		codeBox.Parent = share
+		bind(codeBox, "BackgroundColor3", function() return Theme.Field end)
+		bind(codeBox, "TextColor3", function() return Theme.Text end)
+		bind(codeBox, "PlaceholderColor3", function() return Theme.Dim end)
+		corner(codeBox, 3)
+		outline(codeBox, 0.4)
+		do
+			local bp = Instance.new("UIPadding")
+			bp.PaddingLeft = UDim.new(0, 6)
+			bp.PaddingRight = UDim.new(0, 6)
+			bp.Parent = codeBox
+		end
+
+		local function copyToClipboard(text)
+			local fn = (type(setclipboard) == "function" and setclipboard)
+				or (type(toclipboard) == "function" and toclipboard)
+			if fn then return (pcall(fn, text)) end
+			return false
+		end
+
+		addButton(share, "Export (copy code)", BLUE, BLUE_H, function()
+			local code, err = ConfigAPI.exportCode()
+			if not code then
+				warn("[OUL share] " .. tostring(err))
+				toast("Export failed - see Output")
+				return
+			end
+			codeBox.Text = code
+			if copyToClipboard(code) then
+				toast("Code copied to clipboard")
+			else
+				toast("Code ready - copy it from the box")
+			end
+		end)
+
+		addButton(share, "Import code", BLUE, BLUE_H, function()
+			local ok, err = ConfigAPI.importCode(codeBox.Text)
+			if ok then
+				reloadUI()
+				toast("Config imported")
+			else
+				warn("[OUL share] " .. tostring(err))
+				toast("Import failed - " .. tostring(err))
+			end
+		end)
+
+		addNote(share, "does not include HUD/radar")
+		addNote(share, "positions or ragebot target")
 	end
 end
 
