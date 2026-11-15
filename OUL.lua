@@ -207,6 +207,33 @@ end
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
+-- ============================ EXECUTOR BLOCKLIST ============================
+-- Kicks the player straight away if their executor is on this list.
+-- To block another one, add a line: { match = "name in lowercase", reason = "kick message" }
+local BLOCKED_EXECUTORS = {
+	{ match = "xeno", reason = "Xeno Is Not Supported" },
+}
+do
+	local execName
+	pcall(function()
+		if type(identifyexecutor) == "function" then
+			execName = identifyexecutor()
+		elseif type(getexecutorname) == "function" then
+			execName = getexecutorname()
+		end
+	end)
+	execName = string.lower(tostring(execName or ""))
+	if execName ~= "" then
+		for _, b in ipairs(BLOCKED_EXECUTORS) do
+			if string.find(execName, b.match, 1, true) then
+				pcall(function() LocalPlayer:Kick(b.reason) end)
+				return -- stop the script here, nothing else loads
+			end
+		end
+	end
+end
+-- ========================== END EXECUTOR BLOCKLIST ==========================
+
 -- ============================ LOGO + LOADING SCREEN ============================
 -- One loading screen shared by the key gate and the main script load.
 -- Dark navy backdrop, the OUL logo in the middle that spins as progress climbs,
