@@ -1009,7 +1009,9 @@ local Settings = {
 	OrbitSpeed = 6,
 	VoidSpam = false,
 	VoidInterval = 200,
+	VoidDistance = 1500,
 	AttackInterval = 200,
+	AttackHeight = 6,
 	RageMode = "Closest",
 	RageTarget = "",
 }
@@ -1193,7 +1195,7 @@ local SAVE_NUMBERS = {
 	FOV = { 20, 500 }, Strength = { 1, 500 }, PredictionMs = { 0, 500 }, TriggerDelay = { 0, 300 },
 	BlurAmount = { 1, 56 }, UITransparency = { 0, 70 }, UIScale = { 50, 150 }, FlySpeed = { 5, 1000 },
 	VortexSpeed = { 1, 100 }, VortexRadius = { 2, 60 }, SpeedValue = { 16, 250 },
-	RageDistance = { 2, 20 }, OrbitSpeed = { 1, 30 }, VoidInterval = { 10, 2000 }, AttackInterval = { 10, 2000 }, SkyBrightness = { 0, 100 }, MouseGain = { 5, 100 },
+	RageDistance = { 2, 20 }, OrbitSpeed = { 1, 30 }, VoidInterval = { 10, 2000 }, VoidDistance = { 1, 1000000 }, AttackInterval = { 10, 2000 }, AttackHeight = { 0, 50 }, SkyBrightness = { 0, 100 }, MouseGain = { 5, 100 },
 }
 local SAVE_THEME = { "Text", "Switch", "Accent", "Background", "Outline" }
 local SAVE_ESP = { "Fill", "Outline", "Tracer", "Name", "Box", "BoxFill", "Skeleton", "Sky", "Radar", "RadarLines" }
@@ -4093,7 +4095,9 @@ do
 	local vsg = newGroup(ragePage, 1, "Void Spam")
 	addCheckbox(vsg, "Void Spam", "VoidSpam")
 	addSlider(vsg, "Void Interval", 10, 2000, "VoidInterval")
+	addSlider(vsg, "Void Distance", 1, 1000000, "VoidDistance")
 	addSlider(vsg, "Attack Interval", 10, 2000, "AttackInterval")
+	addSlider(vsg, "Attack Height", 0, 50, "AttackHeight")
 
 	local sel = newGroup(ragePage, 2, "Selected Target")
 
@@ -4211,8 +4215,8 @@ do
 	addNote(info, "orbit: spin around them")
 	addNote(info, "(distance = orbit radius)")
 	addNote(info, "uses Team Check")
-	addNote(info, "Void Spam: sits 500k studs")
-	addNote(info, "out, then jumps inside the")
+	addNote(info, "Void Spam: sits far from the")
+	addNote(info, "nearest player, then jumps above the")
 	addNote(info, "target (Closest / Selected)")
 	addNote(info, "Void Interval: ms in the void")
 	addNote(info, "Attack Interval: ms on target")
@@ -4678,13 +4682,16 @@ do
 		row.LayoutOrder = nextOrder(parent)
 		row.Parent = parent
 
+		local clearable = (b.kind ~= "menu" and b.kind ~= "panic")
+		local rightPad = clearable and 24 or 0
+
 		local label = newLabel(row, b.label, 12)
-		label.Size = UDim2.new(1, -92, 1, 0)
+		label.Size = UDim2.new(1, -(92 + rightPad), 1, 0)
 
 		local btn = Instance.new("TextButton")
 		btn.Size = UDim2.fromOffset(88, 20)
 		btn.AnchorPoint = Vector2.new(1, 0.5)
-		btn.Position = UDim2.new(1, 0, 0.5, 0)
+		btn.Position = UDim2.new(1, -rightPad, 0.5, 0)
 		btn.BorderSizePixel = 0
 		btn.AutoButtonColor = false
 		btn.Font = FONT
@@ -4707,6 +4714,40 @@ do
 			rebinding = (rebinding == b) and nil or b
 			refreshBindUI()
 		end)
+
+		-- small X: delete just this bind (menu / panic can't be deleted so you never lock yourself out)
+		if clearable then
+			local x = Instance.new("TextButton")
+			x.Size = UDim2.fromOffset(20, 20)
+			x.AnchorPoint = Vector2.new(1, 0.5)
+			x.Position = UDim2.new(1, 0, 0.5, 0)
+			x.BackgroundTransparency = 1
+			x.BorderSizePixel = 0
+			x.AutoButtonColor = false
+			x.Font = FONT
+			x.TextSize = 12
+			x.Text = "X"
+			x.Parent = row
+			themeText(x, true)
+			x.MouseEnter:Connect(function()
+				tween(x, { TextColor3 = Color3.fromRGB(235, 90, 90) })
+			end)
+			x.MouseLeave:Connect(function()
+				tween(x, { TextColor3 = Theme.Dim })
+			end)
+			x.MouseButton1Click:Connect(function()
+				if not b.input then
+					toast(b.label .. "  -  already empty")
+					return
+				end
+				b.input = nil
+				if rebinding == b then rebinding = nil end
+				Settings.Holding = false
+				refreshBindUI()
+				updateKeyHints()
+				toast(b.label .. "  keybind deleted")
+			end)
+		end
 	end
 
 	local c = newGroup(keyPage, 1, "Combat")
@@ -4731,7 +4772,39 @@ do
 	addNote(m, "click a bind, then press a key")
 	addNote(m, "or a mouse button (M1/M2/M3)")
 	addNote(m, "Esc  -  cancel    Backspace  -  clear")
+	addNote(m, "X  -  delete that keybind")
 	addNote(m, "Panic  -  unloads everything")
+	do
+		local clearAllBtn
+		local pending = false
+		clearAllBtn = addButton(m, "Delete all keybinds", Color3.fromRGB(170, 55, 65), Color3.fromRGB(205, 75, 85), function()
+			if not pending then
+				pending = true
+				clearAllBtn.Text = "Click again to confirm"
+				task.delay(2.5, function()
+					if pending then
+						pending = false
+						clearAllBtn.Text = "Delete all keybinds"
+					end
+				end)
+				return
+			end
+			pending = false
+			clearAllBtn.Text = "Delete all keybinds"
+			local n = 0
+			for _, b in ipairs(Binds) do
+				if b.kind ~= "menu" and b.kind ~= "panic" and b.input then
+					b.input = nil
+					n += 1
+				end
+			end
+			Settings.Holding = false
+			rebinding = nil
+			refreshBindUI()
+			updateKeyHints()
+			toast("Deleted " .. n .. " keybinds (menu + panic kept)")
+		end)
+	end
 	addButton(m, "Reset all keybinds", Color3.fromRGB(70, 90, 140), Color3.fromRGB(90, 112, 170), function()
 		for _, b in ipairs(Binds) do
 			b.input = b.default
@@ -6291,40 +6364,143 @@ track(RunService.Stepped:Connect(function(_, dt)
 end))
 
 -- ============================ VOID SPAM ============================
--- Cycle: sit at a random point 500,000 studs from 0,0,0 for "Void Interval", then jump
+-- Cycle: sit at a random point "Void Distance" studs from the nearest player for "Void Interval", then jump
 -- exactly onto the target (nearest / selected, same rules as Rage) for "Attack Interval",
 -- then go back out to a new void point, and repeat.
--- The void point is kept above the map's kill height and the character is re-placed every
--- physics step with zero velocity, so it never falls far enough to die.
+--
+-- Staying alive: the void point is at your own height (never below the map's kill height or
+-- any "fell out of the map" check), the character is re-placed every physics step AND every
+-- frame with zero velocity, PlatformStand turns off the fall / fall-damage logic, and your
+-- parts stop colliding so being inside the target can't fling you.
 do
-	local VOID_DISTANCE = 500000
 	local vs = nil -- active state, nil while off
 
-	local function randomVoidPos()
+	local function safeY(y)
 		local kill = workspace.FallenPartsDestroyHeight
-		local y = (kill > -math.huge) and (kill + 100) or -400
-		y = math.min(y, 0)
+		local floor = (kill == kill and kill > -math.huge) and (kill + 300) or -200
+		return math.max(y, floor, -150)
+	end
+
+	-- the point the void is measured from: the nearest player (or the selected one), not 0,0,0
+	local function nearestRef(st)
+		if Settings.RageMode == "Selected" then
+			local t = getRageTarget({ Position = st.anchorPos })
+			if t and t.root and t.root.Parent then return t.root.Position end
+		end
+		local best, bestDist
+		for _, plr in ipairs(Players:GetPlayers()) do
+			if plr ~= LocalPlayer then
+				local c = plr.Character
+				local r = c and c:FindFirstChild("HumanoidRootPart")
+				if r and isAlive(c) and canDamage(plr) then
+					local d = (r.Position - st.anchorPos).Magnitude
+					if not bestDist or d < bestDist then
+						best, bestDist = r.Position, d
+					end
+				end
+			end
+		end
+		return best or st.anchorPos
+	end
+
+	local function randomVoidPos(st)
+		local ref = nearestRef(st)
 		local a = math.random() * math.pi * 2
-		return Vector3.new(math.cos(a) * VOID_DISTANCE, y, math.sin(a) * VOID_DISTANCE)
+		local d = Settings.VoidDistance
+		return Vector3.new(ref.X + math.cos(a) * d, safeY(ref.Y), ref.Z + math.sin(a) * d)
 	end
 
 	local function enter(st, phase)
 		st.phase, st.since = phase, os.clock()
-		if phase == "void" then st.voidPos = randomVoidPos() end
+		if phase == "void" then st.voidPos = randomVoidPos(st) end
+	end
+
+	-- no collisions + no fall logic while spamming
+	local function protect(st)
+		local hum = st.hum
+		if hum and hum.Parent and not hum.PlatformStand then
+			hum.PlatformStand = true
+		end
+		-- no "neck broke" death and no client-side Dead state while out there
+		if not st.guarded and hum and hum.Parent then
+			st.guarded = true
+			st.neck = hum.RequiresNeck
+			pcall(function() hum.RequiresNeck = false end)
+			pcall(function() hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false) end)
+		end
+		local now = os.clock()
+		if now - (st.scanned or 0) > 0.4 then
+			st.scanned = now
+			st.cc = st.cc or {}
+			for _, d in ipairs(st.char:GetDescendants()) do
+				if d:IsA("BasePart") and d.CanCollide then
+					st.cc[d] = true
+					d.CanCollide = false
+				end
+			end
+		end
+	end
+
+	local function unprotect(st)
+		pcall(function()
+			if st.hum and st.hum.Parent then st.hum.PlatformStand = false end
+		end)
+		if st.guarded then
+			pcall(function()
+				if st.hum and st.hum.Parent then
+					st.hum.RequiresNeck = st.neck
+					st.hum:SetStateEnabled(Enum.HumanoidStateType.Dead, true)
+				end
+			end)
+			st.guarded = false
+		end
+		for d in pairs(st.cc or {}) do
+			pcall(function() if d.Parent then d.CanCollide = true end end)
+		end
+		st.cc = nil
+		for _, c in ipairs(st.conns or {}) do pcall(function() c:Disconnect() end) end
+		st.conns = nil
+	end
+
+	-- logs every health drop while Void Spam is on, so you can see WHEN you get hurt
+	local function watch(st)
+		st.conns = {}
+		local last = st.hum.Health
+		st.conns[1] = st.hum.HealthChanged:Connect(function(h)
+			if h < last and vs == st then
+				local t = st.target and (", target " .. tostring(st.target.name)) or ""
+				warn(string.format("[OUL void] health %.0f -> %.0f during '%s' (y=%.0f, dist from origin=%.0f, kill height %s%s)",
+					last, h, tostring(st.phase), st.root.Position.Y, st.root.Position.Magnitude,
+					tostring(workspace.FallenPartsDestroyHeight), t))
+				if h <= 0 and toast then toast("Void Spam: died during " .. tostring(st.phase)) end
+			end
+			last = h
+		end)
+	end
+
+	-- directly above the target (Attack Height studs up), facing the same way as them
+	local function aboveTarget(troot)
+		local cf = troot.CFrame
+		return CFrame.new(cf.Position + Vector3.new(0, Settings.AttackHeight, 0)) * (cf - cf.Position)
+	end
+
+	local function hold(root, cf)
+		root.CFrame = cf
+		root.AssemblyLinearVelocity = Vector3.zero
+		root.AssemblyAngularVelocity = Vector3.zero
 	end
 
 	local function stop()
 		local st = vs
 		if not st then return end
 		vs = nil
-		-- if switched off while out in the void, bring the character back
-		if st.phase == "void" and st.root and st.root.Parent and st.anchorCF then
-			pcall(function()
-				st.root.CFrame = st.anchorCF + Vector3.new(0, 3, 0)
-				st.root.AssemblyLinearVelocity = Vector3.zero
-				st.root.AssemblyAngularVelocity = Vector3.zero
-			end)
-		end
+		pcall(function()
+			-- if switched off while out in the void, bring the character back first
+			if st.phase == "void" and st.root and st.root.Parent and st.anchorCF then
+				hold(st.root, st.anchorCF + Vector3.new(0, 3, 0))
+			end
+		end)
+		unprotect(st)
 		setRageStatus("Target: none")
 	end
 	ConfigAPI.voidSpamRestore = stop
@@ -6377,17 +6553,23 @@ do
 		local hum = char and char:FindFirstChildOfClass("Humanoid")
 		local root = char and char:FindFirstChild("HumanoidRootPart")
 		if not (hum and root and hum.Health > 0) then
+			if vs then unprotect(vs) end
 			vs = nil -- died / respawning: start fresh with the next character
 			return
 		end
 
-		if vs and vs.root ~= root then vs = nil end
+		if vs and (vs.root ~= root or vs.char ~= char) then
+			unprotect(vs)
+			vs = nil
+		end
 		if not vs then
-			vs = { root = root, anchorCF = root.CFrame, anchorPos = root.Position }
+			vs = { root = root, char = char, hum = hum, anchorCF = root.CFrame, anchorPos = root.Position }
+			watch(vs)
 			enter(vs, "void")
 		end
 		local st = vs
 		local now = os.clock()
+		protect(st)
 
 		-- time to attack? stay on the current target until it dies, otherwise pick a new one
 		if st.phase == "void" and now - st.since >= Settings.VoidInterval / 1000 then
@@ -6409,22 +6591,32 @@ do
 			elseif now - st.since >= Settings.AttackInterval / 1000 then
 				enter(st, "void")
 			else
-				-- exactly where the target is, so you are inside them
+				-- directly above the target
 				local troot = t.root
-				st.anchorCF, st.anchorPos = troot.CFrame, troot.Position
-				root.CFrame = troot.CFrame
-				root.AssemblyLinearVelocity = Vector3.zero
-				root.AssemblyAngularVelocity = Vector3.zero
+				st.anchorCF, st.anchorPos = aboveTarget(troot), troot.Position
+				hold(root, st.anchorCF)
 				setRageStatus("Target: " .. t.name)
 				return
 			end
 		end
 
 		-- void phase: hold the character at the void point
-		root.CFrame = CFrame.new(st.voidPos)
-		root.AssemblyLinearVelocity = Vector3.zero
-		root.AssemblyAngularVelocity = Vector3.zero
+		hold(root, CFrame.new(st.voidPos))
 		setRageStatus("Void spam: " .. (st.why or "in void"))
+	end))
+
+	-- the physics step runs between Stepped and Heartbeat: re-pin the character there too so it
+	-- never drifts or builds up velocity before the position is sent to the server
+	track(RunService.Heartbeat:Connect(function()
+		local st = vs
+		if not st or not Settings.VoidSpam then return end
+		local root = st.root
+		if not (root and root.Parent) then return end
+		if st.phase == "void" then
+			hold(root, CFrame.new(st.voidPos))
+		elseif st.phase == "attack" and targetOk(st.target) then
+			hold(root, aboveTarget(st.target.root))
+		end
 	end))
 end
 -- ========================== END VOID SPAM ==========================
