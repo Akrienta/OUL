@@ -1056,6 +1056,9 @@ local Settings = {
 	OrbitSpeed = 6,
 	VoidSpam = false,
 	VoidAutoAttack = false,
+	VoidBehind = false,
+	VoidAbove = true,
+	VoidBelow = false,
 	VoidInterval = 200,
 	VoidDistance = 1500,
 	VoidRoam = true,
@@ -1235,7 +1238,7 @@ local SAVE_BOOLS = {
 	"Enabled", "IgnoreFOV", "TeamCheck", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
 	"Boxes", "BoxFill", "Skeleton", "ESPHealth", "Skybox", "SkyRainbow", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed", "Fullbright", "NoFog", "Radar", "Prediction",
 	"InfiniteJump", "Notifications", "TargetNPCs", "ESPNPCs", "MouseTP", "KeybindList", "Ragebot",
-	"RageBehind", "RageAbove", "RageBelow", "RageOrbit", "MouseAim", "VoidRoam", "VoidAutoAttack", "BGGradient", "BGGradMirror",
+	"RageBehind", "RageAbove", "RageBelow", "RageOrbit", "MouseAim", "VoidRoam", "VoidAutoAttack", "VoidBehind", "VoidAbove", "VoidBelow", "BGGradient", "BGGradMirror",
 }
 local SAVE_NUMBERS = {
 	RadarRange = { 50, 1000 },
@@ -4357,7 +4360,22 @@ do
 	addCheckbox(vsg, "Roam in void", "VoidRoam")
 	addSlider(vsg, "Roam Interval (ms)", 10, 2000, "VoidRoamMs")
 	addSlider(vsg, "Attack Interval", 10, 2000, "AttackInterval")
-	addSlider(vsg, "Attack Height", 0, 50, "AttackHeight")
+	addSlider(vsg, "Attack Distance", 0, 50, "AttackHeight")
+	local voidModes = { "VoidBehind", "VoidAbove", "VoidBelow" }
+	local function voidModeChanged(key)
+		return function(on)
+			if not on then return end
+			for _, k in ipairs(voidModes) do
+				if k ~= key then
+					Settings[k] = false
+					if refreshers[k] then refreshers[k](true) end
+				end
+			end
+		end
+	end
+	addCheckbox(vsg, "Teleport Behind", "VoidBehind", voidModeChanged("VoidBehind"))
+	addCheckbox(vsg, "Teleport Above", "VoidAbove", voidModeChanged("VoidAbove"))
+	addCheckbox(vsg, "Teleport Below", "VoidBelow", voidModeChanged("VoidBelow"))
 
 	local sel = newGroup(ragePage, 2, "Selected Target")
 
@@ -5941,6 +5959,9 @@ track(RunService.Heartbeat:Connect(function()
 	end
 end))
 
+-- fireClick is local to this block, so share it with Void Spam
+ConfigAPI.fireClick = fireClick
+
 end
 
 local tracerLines = {}
@@ -6755,11 +6776,12 @@ do
 	timerLbl.ZIndex = 120
 	timerLbl.Parent = gui
 
-	-- auto M1: fireClick is an OS-level click, so it works with chat open.
+	-- auto M1 = a real left click (same one the triggerbot uses), so it works with chat open.
 	-- If the menu is open a real click would hit the menu, so use the tool directly instead.
 	local function autoClick()
-		if not menuOpen then
-			fireClick()
+		local click = ConfigAPI.fireClick
+		if not menuOpen and click then
+			pcall(click)
 			return
 		end
 		local char = LocalPlayer.Character
@@ -6820,6 +6842,7 @@ do
 	local function enter(st, phase)
 		st.phase, st.since = phase, os.clock()
 		st.lastClick = nil
+		st.preClicked = false
 		if phase == "void" then st.voidPos, st.hopAt = randomVoidPos(st), os.clock() end
 	end
 
@@ -6886,10 +6909,20 @@ do
 		end)
 	end
 
-	-- directly above the target (Attack Height studs up), facing the same way as them
+	-- where to land on the target: behind / above / below (Attack Distance studs away),
+	-- facing the same way as them. Above is the default if none is ticked.
 	local function aboveTarget(troot)
 		local cf = troot.CFrame
-		return CFrame.new(cf.Position + Vector3.new(0, Settings.AttackHeight, 0)) * (cf - cf.Position)
+		local d = Settings.AttackHeight
+		local offset = Vector3.new(0, d, 0)
+		if Settings.VoidBehind then
+			local look = cf.LookVector
+			local flat = Vector3.new(look.X, 0, look.Z)
+			if flat.Magnitude > 0.01 then offset = -flat.Unit * d end
+		elseif Settings.VoidBelow then
+			offset = Vector3.new(0, -d, 0)
+		end
+		return CFrame.new(cf.Position + offset) * (cf - cf.Position)
 	end
 
 	local function hold(root, cf)
@@ -6978,6 +7011,13 @@ do
 		local st = vs
 		local now = os.clock()
 		protect(st)
+
+		-- Auto Attack: fire one click 50ms BEFORE the teleport, so the swing lands as you arrive
+		if Settings.VoidAutoAttack and st.phase == "void" and not st.preClicked
+			and now - st.since >= Settings.VoidInterval / 1000 - 0.05 then
+			st.preClicked = true
+			if pickTarget(st) then autoClick() end
+		end
 
 		-- time to attack? stay on the current target until it dies, otherwise pick a new one
 		if st.phase == "void" and now - st.since >= Settings.VoidInterval / 1000 then
