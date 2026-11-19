@@ -1056,6 +1056,8 @@ local Settings = {
 	OrbitSpeed = 6,
 	VoidSpam = false,
 	VoidAutoAttack = false,
+	RageLowestHP = false,
+	VoidLowestHP = false,
 	VoidBehind = false,
 	VoidAbove = true,
 	VoidBelow = false,
@@ -1083,7 +1085,7 @@ local DisplayNames = {
 	Watermark = "Watermark", BlurEnabled = "Background Blur", Notifications = "Notifications",
 	TargetNPCs = "Target Zombies/NPCS", ESPNPCs = "Zombie/NPC ESP",
 	MouseTP = "Mouse TP", KeybindList = "Keybind List",
-	Ragebot = "Ragebot", RageOrbit = "Orbit", VoidSpam = "Void Spam", VoidAutoAttack = "Void Auto Attack",
+	Ragebot = "Ragebot", RageOrbit = "Orbit", VoidSpam = "Void Spam", VoidAutoAttack = "Void Auto Attack", RageLowestHP = "Rage Lowest Health", VoidLowestHP = "Void Lowest Health",
 	Fullbright = "Fullbright", NoFog = "No Fog", Radar = "Radar",
 }
 
@@ -1238,7 +1240,7 @@ local SAVE_BOOLS = {
 	"Enabled", "IgnoreFOV", "TeamCheck", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
 	"Boxes", "BoxFill", "Skeleton", "ESPHealth", "Skybox", "SkyRainbow", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed", "Fullbright", "NoFog", "Radar", "Prediction",
 	"InfiniteJump", "Notifications", "TargetNPCs", "ESPNPCs", "MouseTP", "KeybindList", "Ragebot",
-	"RageBehind", "RageAbove", "RageBelow", "RageOrbit", "MouseAim", "VoidRoam", "VoidAutoAttack", "VoidBehind", "VoidAbove", "VoidBelow", "BGGradient", "BGGradMirror",
+	"RageBehind", "RageAbove", "RageBelow", "RageOrbit", "MouseAim", "VoidRoam", "VoidAutoAttack", "RageLowestHP", "VoidLowestHP", "VoidBehind", "VoidAbove", "VoidBelow", "BGGradient", "BGGradMirror",
 }
 local SAVE_NUMBERS = {
 	RadarRange = { 50, 1000 },
@@ -4332,6 +4334,7 @@ do
 	local g = newGroup(ragePage, 1, "Ragebot")
 	addCheckbox(g, "Rage", "Ragebot")
 	addSegment(g, "Mode", "RageMode", "Closest", "Selected")
+	addCheckbox(g, "Target Lowest Health", "RageLowestHP")
 
 	local rageModes = { "RageBehind", "RageAbove", "RageBelow" }
 	local function modeChanged(key)
@@ -4355,6 +4358,7 @@ do
 	local vsg = newGroup(ragePage, 1, "Void Spam")
 	addCheckbox(vsg, "Void Spam", "VoidSpam")
 	addCheckbox(vsg, "Auto Attack (M1)", "VoidAutoAttack")
+	addCheckbox(vsg, "Target Lowest Health", "VoidLowestHP")
 	addSlider(vsg, "Void Interval", 10, 2000, "VoidInterval")
 	addSlider(vsg, "Void Distance", 1, 10000000, "VoidDistance")
 	addCheckbox(vsg, "Roam in void", "VoidRoam")
@@ -6631,6 +6635,12 @@ local function mouseTeleport()
 	root.AssemblyLinearVelocity = Vector3.zero
 end
 
+-- health of a character (huge if unknown) used by the "Target Lowest Health" options
+local function charHealth(char)
+	local h = char and char:FindFirstChildOfClass("Humanoid")
+	return h and h.Health or math.huge
+end
+
 local rageTarget = nil
 local rageShown = nil
 local rageAngle = 0
@@ -6659,7 +6669,7 @@ local function getRageTarget(myRoot)
 		return { root = root, name = pick.Name, plr = pick }
 	end
 
-	if rageTarget and rageTarget.plr and rageTarget.plr.Parent == Players then
+	if not Settings.RageLowestHP and rageTarget and rageTarget.plr and rageTarget.plr.Parent == Players then
 		local char = rageTarget.plr.Character
 		local root = char and char:FindFirstChild("HumanoidRootPart")
 		if root and root == rageTarget.root and isAlive(char) then
@@ -6667,15 +6677,17 @@ local function getRageTarget(myRoot)
 		end
 	end
 
-	local best, bestDist
+	local best, bestDist, bestHP
 	for _, plr in ipairs(Players:GetPlayers()) do
 		if plr ~= LocalPlayer then
 			local char = plr.Character
 			local root = char and char:FindFirstChild("HumanoidRootPart")
 			if root and isAlive(char) and canDamage(plr) then
 				local d = (root.Position - myRoot.Position).Magnitude
-				if not bestDist or d < bestDist then
-					best, bestDist = { root = root, name = plr.Name, plr = plr }, d
+				local hp = Settings.RageLowestHP and charHealth(char) or 0
+				-- lowest health first (if on), nearest breaks ties
+				if not bestDist or hp < bestHP or (hp == bestHP and d < bestDist) then
+					best, bestDist, bestHP = { root = root, name = plr.Name, plr = plr }, d, hp
 				end
 			end
 		end
@@ -6963,19 +6975,20 @@ do
 			return t
 		end
 
-		-- Closest: keep the current target until it is dead
-		if targetOk(st.target) then return st.target end
+		-- Closest: keep the current target until it is dead (not with Lowest Health: re-pick every time)
+		if not Settings.VoidLowestHP and targetOk(st.target) then return st.target end
 		st.target = nil
 
-		local best, bestDist
+		local best, bestDist, bestHP
 		for _, plr in ipairs(Players:GetPlayers()) do
 			if plr ~= LocalPlayer then
 				local c = plr.Character
 				local r = c and c:FindFirstChild("HumanoidRootPart")
 				if r and isAlive(c) and canDamage(plr) then
 					local d = (r.Position - st.anchorPos).Magnitude
-					if not bestDist or d < bestDist then
-						best, bestDist = { root = r, name = plr.Name, plr = plr }, d
+					local hp = Settings.VoidLowestHP and charHealth(c) or 0
+					if not bestDist or hp < bestHP or (hp == bestHP and d < bestDist) then
+						best, bestDist, bestHP = { root = r, name = plr.Name, plr = plr }, d, hp
 					end
 				end
 			end
