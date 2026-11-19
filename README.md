@@ -7,6 +7,7 @@ Combat ---
 - TriggerBot -- Delay (ms)
 - SilentAim - (Soon)(Rivals*)
 - AntiKatana - (Soon)(Rivals*)
+- VoidSpam -- Above, Below, Behind, AutoAttack, VRoam, VoidInterval, AttackInterval - (Teleports The Player A Set Distance Out Into The Void And Teleports Back To The Player After A Period Of Time)
   
 Movement ---
 - Vortex - (Buggy/ Experimental - (Splits The Characters Parts Into An Orbit Around The Center Of Your Hitbox))
