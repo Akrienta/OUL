@@ -5,6 +5,7 @@
 --     ╚╗░░╚══════╝░░╔╝   ╚╗░░╚════╝░░╔╝  ║░░░╚═══════╗  		  --
 --      ╚╗░░░░░░░░░░╔╝     ╚╗░░░░░░░░╔╝   ║░░░░░░░░░░░║ 		  --
 --       ╚══════════╝       ╚════════╝    ╚═══════════╝  	   	  --
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -1054,6 +1055,7 @@ local Settings = {
 	RageOrbit = false,
 	OrbitSpeed = 6,
 	VoidSpam = false,
+	VoidAutoAttack = false,
 	VoidInterval = 200,
 	VoidDistance = 1500,
 	VoidRoam = true,
@@ -1078,7 +1080,7 @@ local DisplayNames = {
 	Watermark = "Watermark", BlurEnabled = "Background Blur", Notifications = "Notifications",
 	TargetNPCs = "Target Zombies/NPCS", ESPNPCs = "Zombie/NPC ESP",
 	MouseTP = "Mouse TP", KeybindList = "Keybind List",
-	Ragebot = "Ragebot", RageOrbit = "Orbit", VoidSpam = "Void Spam",
+	Ragebot = "Ragebot", RageOrbit = "Orbit", VoidSpam = "Void Spam", VoidAutoAttack = "Void Auto Attack",
 	Fullbright = "Fullbright", NoFog = "No Fog", Radar = "Radar",
 }
 
@@ -1233,7 +1235,7 @@ local SAVE_BOOLS = {
 	"Enabled", "IgnoreFOV", "TeamCheck", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
 	"Boxes", "BoxFill", "Skeleton", "ESPHealth", "Skybox", "SkyRainbow", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed", "Fullbright", "NoFog", "Radar", "Prediction",
 	"InfiniteJump", "Notifications", "TargetNPCs", "ESPNPCs", "MouseTP", "KeybindList", "Ragebot",
-	"RageBehind", "RageAbove", "RageBelow", "RageOrbit", "MouseAim", "VoidRoam", "BGGradient", "BGGradMirror",
+	"RageBehind", "RageAbove", "RageBelow", "RageOrbit", "MouseAim", "VoidRoam", "VoidAutoAttack", "BGGradient", "BGGradMirror",
 }
 local SAVE_NUMBERS = {
 	RadarRange = { 50, 1000 },
@@ -3010,7 +3012,7 @@ local function newPage(name, hasSubs)
 	frame.Parent = panel
 
 	local cols = {}
-	for i = 1, 2 do
+	for i = 1, 4 do
 		local col = Instance.new("Frame")
 		col.BackgroundTransparency = 1
 		col.Size = UDim2.new(0.5, -4, 0, 0)
@@ -3040,6 +3042,8 @@ local function newGroup(page, colIndex, titleText)
 	g.AutomaticSize = Enum.AutomaticSize.Y
 	g.BorderSizePixel = 0
 	g.LayoutOrder = nextOrder(col)
+	g:SetAttribute("OULHome", colIndex)
+	g:SetAttribute("OULOrd", g.LayoutOrder)
 	g.Parent = col
 	bind(g, "BackgroundColor3", function()
 		return Theme.Group
@@ -3160,6 +3164,10 @@ local function newGroup(page, colIndex, titleText)
 				setCollapsed(not collapsed, true)
 			end
 		end)
+		-- every "Info" box starts closed (the Vortex WARNING box is titled differently, so it stays open)
+		if titleText == "Info" and Settings.UIStyle == "Modern" then
+			setCollapsed(true, false)
+		end
 		onTheme(function()
 			if collapsed and Settings.UIStyle ~= "Modern" then
 				setCollapsed(false, true)
@@ -3777,53 +3785,129 @@ local function refreshTabs(animate)
 	end
 end
 
--- Basic style stacks the two columns on top of each other. If that would be taller than the
--- screen, it widens out into two side-by-side columns instead (like Classic) so it fits.
-local function useStacked(p)
-	if Settings.UIStyle ~= "Basic" then return false end
-	local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
-	if not vp then return true end
-	local stackedH = 8 * (#p.cols - 1)
-	for _, c in ipairs(p.cols) do
-		stackedH = stackedH + c.layout.AbsoluteContentSize.Y
+-- ===== Basic style layout =====
+-- Basic puts every group in as few columns as it takes to fit on the screen: one column if the
+-- page is short, otherwise two, three or four, and the menu gets wider with each extra column.
+-- Other styles keep the normal two-column layout and the groups go back to their home column.
+local BASIC_COL_W = 270
+
+-- ratio between Absolute sizes and the sizes used in UDim2 offsets (differs when UI Size is not 100%)
+-- (measured on the title bar, whose height never changes, so it is not thrown off while the menu resizes)
+ConfigAPI.absK = function()
+	local k = titleBar.AbsoluteSize.Y / TITLE_H
+	if k < 0.2 or k ~= k or k > 5 then k = 1 end
+	return k
+end
+
+ConfigAPI.allGroups = function(p)
+	local list = {}
+	for i = 1, #p.cols do
+		for _, ch in ipairs(p.cols[i].frame:GetChildren()) do
+			if ch:IsA("Frame") and ch:GetAttribute("OULHome") then
+				list[#list + 1] = ch
+			end
+		end
 	end
+	table.sort(list, function(a, b)
+		local ha, hb = a:GetAttribute("OULHome"), b:GetAttribute("OULHome")
+		if ha ~= hb then return ha < hb end
+		return a:GetAttribute("OULOrd") < b:GetAttribute("OULOrd")
+	end)
+	return list
+end
+
+ConfigAPI.restoreHome = function(p)
+	for _, g in ipairs(ConfigAPI.allGroups(p)) do
+		local home = p.cols[g:GetAttribute("OULHome")].frame
+		if g.Parent ~= home then g.Parent = home end
+		local ord = g:GetAttribute("OULOrd")
+		if g.LayoutOrder ~= ord then g.LayoutOrder = ord end
+	end
+end
+
+-- picks the column count for a page, moves the groups, returns (columns, tallest column height)
+ConfigAPI.reflowBasic = function(p)
+	local groups = ConfigAPI.allGroups(p)
+	local k = ConfigAPI.absK()
+	local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
 	local _, py = pageOrigin()
-	local total = py + p.subOffset + stackedH + FOOTER_H + 8
-	return total * (Settings.UIScale / 100) <= vp.Y - 20
+	local availH = (vp.Y - 20) / (Settings.UIScale / 100) - (py + p.subOffset + FOOTER_H + 8)
+
+	local hs, sum = {}, 0
+	for i, g in ipairs(groups) do
+		hs[i] = g.AbsoluteSize.Y / k
+		sum = sum + hs[i]
+	end
+
+	local function plan(n)
+		local target = (sum + 8 * #groups) / n
+		local assign, colH, count, col, maxH = {}, 0, 0, 1, 0
+		for i = 1, #groups do
+			colH = colH + hs[i] + (count > 0 and 8 or 0)
+			count = count + 1
+			assign[i] = col
+			maxH = math.max(maxH, colH)
+			if colH >= target and col < n then
+				col, colH, count = col + 1, 0, 0
+			end
+		end
+		return assign, maxH
+	end
+
+	local chosen, assign, maxH = 4, nil, 0
+	for n = 1, 4 do
+		local a, m = plan(n)
+		if m <= availH or n == 4 then
+			chosen, assign, maxH = n, a, m
+			break
+		end
+	end
+
+	for i, g in ipairs(groups) do
+		local target = p.cols[assign[i]].frame
+		if g.Parent ~= target then g.Parent = target end
+		if g.LayoutOrder ~= i then g.LayoutOrder = i end
+	end
+	return chosen, maxH
 end
 
 local function pageHeight(p)
+	local style = Settings.UIStyle
+	if style == "Basic" and p.basicH then return p.basicH end
+	local k = ConfigAPI.absK()
 	local h = 0
-	if useStacked(p) then
-		for _, c in ipairs(p.cols) do
-			h = h + c.layout.AbsoluteContentSize.Y
-		end
-		return h + 8 * (#p.cols - 1)
-	end
-	for _, c in ipairs(p.cols) do
-		h = math.max(h, c.layout.AbsoluteContentSize.Y)
+	for i = 1, 2 do
+		h = math.max(h, p.cols[i].layout.AbsoluteContentSize.Y / k)
 	end
 	return h
 end
 
 updateSize = function(animate)
 	local px, py = pageOrigin()
+	local basic = Settings.UIStyle == "Basic"
 	for _, p in pairs(pages) do
-		local c1, c2 = p.cols[1].frame, p.cols[2] and p.cols[2].frame
-		if useStacked(p) then
-			c1.Size = UDim2.new(1, 0, 0, 0)
-			c1.Position = UDim2.new(0, 0, 0, 0)
-			if c2 then
-				c2.Size = UDim2.new(1, 0, 0, 0)
-				c2.Position = UDim2.new(0, 0, 0, c1.AbsoluteSize.Y + 8)
+		if basic then
+			local n, h = ConfigAPI.reflowBasic(p)
+			p.basicN, p.basicH = n, h
+			for i = 1, 4 do
+				local c = p.cols[i].frame
+				if i <= n then
+					c.Size = UDim2.new(1 / n, -math.floor(8 * (n - 1) / n), 0, 0)
+					c.Position = UDim2.new((i - 1) / n, math.floor(8 * (i - 1) / n), 0, 0)
+				else
+					c.Size = UDim2.new(0, 0, 0, 0)
+				end
 			end
 		else
+			ConfigAPI.restoreHome(p)
+			p.basicN, p.basicH = nil, nil
+			local c1, c2 = p.cols[1].frame, p.cols[2].frame
 			c1.Size = UDim2.new(0.5, -4, 0, 0)
 			c1.Position = UDim2.new(0, 0, 0, 0)
-			if c2 then
-				c2.Size = UDim2.new(0.5, -4, 0, 0)
-				c2.Position = UDim2.new(0.5, 4, 0, 0)
-			end
+			c2.Size = UDim2.new(0.5, -4, 0, 0)
+			c2.Position = UDim2.new(0.5, 4, 0, 0)
+			p.cols[3].frame.Size = UDim2.new(0, 0, 0, 0)
+			p.cols[4].frame.Size = UDim2.new(0, 0, 0, 0)
 		end
 		p.frame.Position = UDim2.fromOffset(px, py + p.subOffset)
 		p.frame.Size = UDim2.new(1, -(px + 8), 0, pageHeight(p))
@@ -3831,20 +3915,37 @@ updateSize = function(animate)
 	if not currentPage or not pages[currentPage] then return end
 	local cur = pages[currentPage]
 
+	-- the menu gets wider when Basic needs more columns
+	local width = PANEL_W
+	if basic and cur.basicN then
+		width = math.max(PANEL_W, 16 + cur.basicN * BASIC_COL_W + (cur.basicN - 1) * 8)
+	end
+	ConfigAPI.panelW = width
+
+	if Settings.UIStyle ~= "Modern" then
+		for _, b in pairs(subBars) do
+			b.frame.Size = UDim2.new(1, -(px + 8), 0, SUB_H - 4)
+		end
+	end
+
 	local pageH = math.max(pageHeight(cur) + cur.subOffset, #TAB_NAMES * TAB_ROW + 8)
-	local target = UDim2.fromOffset(PANEL_W, py + pageH + FOOTER_H + 8)
+	local target = UDim2.fromOffset(width, py + pageH + FOOTER_H + 8)
 	if animate then
 		tween(panel, { Size = target }, SLIDE)
 	else
 		panel.Size = target
 	end
 
-	-- keep the bottom of the menu on screen after it changes size
+	-- keep the menu on screen after it changes size
 	local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
 	if vp then
-		local maxY = math.max(0, vp.Y - target.Y.Offset * (Settings.UIScale / 100))
-		if panel.Position.Y.Offset > maxY then
-			panel.Position = UDim2.fromOffset(panel.Position.X.Offset, maxY)
+		local sc = Settings.UIScale / 100
+		local maxX = math.max(0, vp.X - target.X.Offset * sc)
+		local maxY = math.max(0, vp.Y - target.Y.Offset * sc)
+		local x = math.clamp(panel.Position.X.Offset, 0, maxX)
+		local y = math.clamp(panel.Position.Y.Offset, 0, maxY)
+		if x ~= panel.Position.X.Offset or y ~= panel.Position.Y.Offset then
+			panel.Position = UDim2.fromOffset(x, y)
 		end
 	end
 end
@@ -4250,6 +4351,7 @@ do
 
 	local vsg = newGroup(ragePage, 1, "Void Spam")
 	addCheckbox(vsg, "Void Spam", "VoidSpam")
+	addCheckbox(vsg, "Auto Attack (M1)", "VoidAutoAttack")
 	addSlider(vsg, "Void Interval", 10, 2000, "VoidInterval")
 	addSlider(vsg, "Void Distance", 1, 10000000, "VoidDistance")
 	addCheckbox(vsg, "Roam in void", "VoidRoam")
@@ -4762,7 +4864,7 @@ do
 			-- keep the window on screen after resizing
 			local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize
 			if vp then
-				local w, h = PANEL_W * v / 100, panel.Size.Y.Offset * v / 100
+				local w, h = (ConfigAPI.panelW or PANEL_W) * v / 100, panel.Size.Y.Offset * v / 100
 				panel.Position = UDim2.fromOffset(
 					math.clamp(panel.Position.X.Offset, 0, math.max(0, vp.X - w)),
 					math.clamp(panel.Position.Y.Offset, 0, math.max(0, vp.Y - h))
@@ -6638,6 +6740,48 @@ end))
 do
 	local vs = nil -- active state, nil while off
 
+	-- on-screen timer just under the centre of the screen (only while Void Spam is on)
+	local timerLbl = Instance.new("TextLabel")
+	timerLbl.Name = "OULVoidTimer"
+	timerLbl.AnchorPoint = Vector2.new(0.5, 0)
+	timerLbl.Position = UDim2.new(0.5, 0, 0.5, 40)
+	timerLbl.Size = UDim2.fromOffset(300, 24)
+	timerLbl.BackgroundTransparency = 1
+	timerLbl.Font = FONT
+	timerLbl.TextSize = 18
+	timerLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+	timerLbl.TextStrokeTransparency = 0.3
+	timerLbl.Visible = false
+	timerLbl.ZIndex = 120
+	timerLbl.Parent = gui
+
+	-- auto M1: fireClick is an OS-level click, so it works with chat open.
+	-- If the menu is open a real click would hit the menu, so use the tool directly instead.
+	local function autoClick()
+		if not menuOpen then
+			fireClick()
+			return
+		end
+		local char = LocalPlayer.Character
+		local tool = char and char:FindFirstChildOfClass("Tool")
+		if tool then pcall(function() tool:Activate() end) end
+	end
+
+	track(RunService.RenderStepped:Connect(function()
+		local st = vs
+		if not (Settings.VoidSpam and st) then
+			timerLbl.Visible = false
+			return
+		end
+		timerLbl.Visible = true
+		if st.phase == "attack" and st.target then
+			timerLbl.Text = "Attacking  " .. tostring(st.target.name)
+		else
+			local left = math.max(0, Settings.VoidInterval / 1000 - (os.clock() - st.since))
+			timerLbl.Text = string.format("Roaming  %.1fs", left)
+		end
+	end))
+
 	local function safeY(y)
 		local kill = workspace.FallenPartsDestroyHeight
 		local floor = (kill == kill and kill > -math.huge) and (kill + 300) or -200
@@ -6675,6 +6819,7 @@ do
 
 	local function enter(st, phase)
 		st.phase, st.since = phase, os.clock()
+		st.lastClick = nil
 		if phase == "void" then st.voidPos, st.hopAt = randomVoidPos(st), os.clock() end
 	end
 
@@ -6858,6 +7003,10 @@ do
 				local troot = t.root
 				st.anchorCF, st.anchorPos = aboveTarget(troot), troot.Position
 				hold(root, st.anchorCF)
+				if Settings.VoidAutoAttack and now - (st.lastClick or 0) >= 0.12 then
+					st.lastClick = now
+					autoClick()
+				end
 				setRageStatus("Target: " .. t.name)
 				return
 			end
