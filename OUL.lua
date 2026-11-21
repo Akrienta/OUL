@@ -2520,8 +2520,8 @@ do
 	ConfigAPI.hdrTitle, ConfigAPI.hdrSub = t, sub
 end
 
-local TAB_NAMES = { "combat", "visuals", "movement", "settings" }
-local TAB_LABELS = { combat = "Combat", visuals = "Visuals", movement = "Movement", settings = "Settings" }
+local TAB_NAMES = { "combat", "visuals", "movement", "themes", "settings" }
+local TAB_LABELS = { combat = "Combat", visuals = "Visuals", movement = "Movement", themes = "Themes", settings = "Settings" }
 
 local SUBTABS = {
 	combat = {
@@ -2532,6 +2532,7 @@ local SUBTABS = {
 		{ id = "ragebot", label = "Ragebot" },
 	},
 	visuals = { { id = "esp", label = "ESP" }, { id = "colours", label = "Colours" }, { id = "sky", label = "Sky" }, { id = "radar", label = "Radar" }, { id = "world", label = "World" } },
+	themes = { { id = "style", label = "Style" }, { id = "background", label = "Background" } },
 	settings = { { id = "general", label = "General" }, { id = "keybinds", label = "Keybinds" }, { id = "configs", label = "Configs" } },
 	movement = { { id = "fly", label = "Fly" }, { id = "vortex", label = "Vortex" }, { id = "noclip", label = "Noclip" }, { id = "speed", label = "Speed" }, { id = "jump", label = "Jump" }, { id = "mousetp", label = "Mouse TP" } },
 }
@@ -3000,7 +3001,7 @@ local function reg(parent, text)
 end
 local currentTab
 local currentPage
-local currentSub = { combat = "aimbot", visuals = "esp", movement = "fly", settings = "general" }
+local currentSub = { combat = "aimbot", visuals = "esp", movement = "fly", themes = "style", settings = "general" }
 local pageState = {}
 local updateSize
 
@@ -3963,6 +3964,7 @@ ConfigAPI.updateHeader = function()
 		combat = "aim assist, triggers and rage tools",
 		visuals = "esp, colours, sky and radar",
 		movement = "fly, vortex, noclip and speed",
+		themes = "ui style, colours and gradient",
 		settings = "menu, keybinds and configs",
 	}
 	local subLabel
@@ -4817,7 +4819,9 @@ end
 
 do
 	local settingsPage = newPage("settings_general", true)
-	local uiStyle = newGroup(settingsPage, 1, "UI Style")
+	local themeStylePage = newPage("themes_style", true)
+	local themeBgPage = newPage("themes_background", true)
+	local uiStyle = newGroup(themeStylePage, 1, "UI Style")
 	addNote(uiStyle, "Basic: square, bold red bars")
 	addNote(uiStyle, "Modern: cards, switches, pill tabs")
 	addNote(uiStyle, "your accent colours stay the same")
@@ -4911,7 +4915,7 @@ do
 		updateBlur()
 	end)
 
-	local u = newGroup(settingsPage, 1, "Script")
+	local u = newGroup(settingsPage, 2, "Script")
 	addButton(u, "Unload", Color3.fromRGB(170, 55, 65), Color3.fromRGB(205, 75, 85), function()
 		local fn = shared.OULCleanup
 		shared.OULCleanup = nil
@@ -4929,7 +4933,7 @@ do
 	local textDefault = Theme.Text
 	local outlineDefault = Theme.Outline
 
-	local c = newGroup(settingsPage, 2, "Menu Colours")
+	local c = newGroup(themeStylePage, 2, "Menu Colours")
 	addColor(c, "Checkbox", paletteWith(switchDefault), function(color)
 		Theme.Switch = color
 		applyTheme()
@@ -4951,7 +4955,7 @@ do
 		applyTheme()
 	end, outlineDefault, 0.45, 0.6)
 
-	local bg = newGroup(settingsPage, 2, "Background")
+	local bg = newGroup(themeBgPage, 1, "Background")
 	addCheckbox(bg, "Gradient", "BGGradient", function() ConfigAPI.updateBG(true) end)
 	addCheckbox(bg, "Both corners", "BGGradMirror", function() ConfigAPI.updateBG(false) end)
 	-- black / grey / white up front, then the usual colours
