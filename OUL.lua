@@ -1,14 +1,8 @@
---      ___           ___           ___     --
---     /\  \         /\__\         /\__\    --
---    /::\  \       /:/  /        /:/  /    --
---   /:/\:\  \     /:/  /        /:/  /     --
---  /:/  \:\  \   /:/  /  ___   /:/  /      --
--- /:/__/ \:\__\ /:/__/  /\__\ /:/__/       --
--- \:\  \ /:/  / \:\  \ /:/  / \:\  \       --
---  \:\  /:/  /   \:\  /:/  /   \:\  \      --
---   \:\/:/  /     \:\/:/  /     \:\  \     --
---    \::/  /       \::/  /       \:\__\    --
---     \/__/         \/__/         \/__/    --
+-- 		  ____    _   _   _    		  --
+-- 		 / __ \  | | | | | |    	  --
+-- 		| |  | | | | | | | |   		  --
+-- 		| |  | | | |_| | | |___ 	  --
+-- 		 \____/   \___/  |_____|	  --
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -6792,9 +6786,14 @@ do
 	timerLbl.ZIndex = 120
 	timerLbl.Parent = gui
 
-	-- auto M1 = a real left click (same one the triggerbot uses), so it works with chat open.
-	-- If the menu is open a real click would hit the menu, so use the tool directly instead.
+	-- auto M1 = a real left click (same one the triggerbot uses).
+	-- Skipped while chat / the Roblox menu is open. If this script's own menu is open a real click
+	-- would hit it, so the tool is used directly instead.
+	local GuiServiceRef = game:GetService("GuiService")
 	local function autoClick()
+		-- never attack while the chat box is focused or the Roblox menu (Esc) is open
+		if UserInputService:GetFocusedTextBox() then return end
+		if GuiServiceRef.MenuIsOpen then return end
 		local click = ConfigAPI.fireClick
 		if not menuOpen and click then
 			pcall(click)
