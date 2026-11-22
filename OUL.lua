@@ -1054,6 +1054,12 @@ local Settings = {
 	OrbitSpeed = 6,
 	VoidSpam = false,
 	VoidAutoAttack = false,
+	SilentAim = false,
+	SilentIgnoreFOV = true,
+	SilentVisible = false,
+	SilentShowFOV = true,
+	SilentPart = "Head",
+	SilentFOV = 150,
 	RageLowestHP = false,
 	VoidLowestHP = false,
 	VoidBehind = false,
@@ -1083,7 +1089,7 @@ local DisplayNames = {
 	Watermark = "Watermark", BlurEnabled = "Background Blur", Notifications = "Notifications",
 	TargetNPCs = "Target Zombies/NPCS", ESPNPCs = "Zombie/NPC ESP",
 	MouseTP = "Mouse TP", KeybindList = "Keybind List",
-	Ragebot = "Ragebot", RageOrbit = "Orbit", VoidSpam = "Void Spam", VoidAutoAttack = "Void Auto Attack", RageLowestHP = "Rage Lowest Health", VoidLowestHP = "Void Lowest Health",
+	Ragebot = "Ragebot", RageOrbit = "Orbit", VoidSpam = "Void Spam", VoidAutoAttack = "Void Auto Attack", SilentAim = "Silent Aim", RageLowestHP = "Rage Lowest Health", VoidLowestHP = "Void Lowest Health",
 	Fullbright = "Fullbright", NoFog = "No Fog", Radar = "Radar",
 }
 
@@ -1095,7 +1101,7 @@ defBind("menu", "Menu", "menu", nil, Enum.KeyCode.End)
 defBind("panic", "Panic (unload)", "panic", nil, Enum.KeyCode.Home)
 defBind("aim", "Aim key", "hold", nil, Enum.UserInputType.MouseButton2)
 for _, k in ipairs({
-	"Enabled", "ShowFOV", "IgnoreFOV", "TeamCheck", "Triggerbot", "Ragebot", "VoidSpam", "ESP", "Chams", "ShowNames", "Tracers", "Boxes",
+	"Enabled", "ShowFOV", "IgnoreFOV", "TeamCheck", "Triggerbot", "Ragebot", "VoidSpam", "SilentAim", "ESP", "Chams", "ShowNames", "Tracers", "Boxes",
 	"BoxFill", "Skeleton", "Skybox", "Fly", "Noclip", "Speed", "InfiniteJump", "Watermark", "BlurEnabled", "Notifications", "KeybindList",
 }) do
 	local default
@@ -1238,7 +1244,7 @@ local SAVE_BOOLS = {
 	"Enabled", "IgnoreFOV", "TeamCheck", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
 	"Boxes", "BoxFill", "Skeleton", "ESPHealth", "Skybox", "SkyRainbow", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed", "Fullbright", "NoFog", "Radar", "Prediction",
 	"InfiniteJump", "Notifications", "TargetNPCs", "ESPNPCs", "MouseTP", "KeybindList", "Ragebot",
-	"RageBehind", "RageAbove", "RageBelow", "RageOrbit", "MouseAim", "VoidRoam", "VoidAutoAttack", "RageLowestHP", "VoidLowestHP", "VoidBehind", "VoidAbove", "VoidBelow", "BGGradient", "BGGradMirror",
+	"RageBehind", "RageAbove", "RageBelow", "RageOrbit", "MouseAim", "VoidRoam", "VoidAutoAttack", "SilentAim", "SilentIgnoreFOV", "SilentVisible", "SilentShowFOV", "RageLowestHP", "VoidLowestHP", "VoidBehind", "VoidAbove", "VoidBelow", "BGGradient", "BGGradMirror",
 }
 local SAVE_NUMBERS = {
 	RadarRange = { 50, 1000 },
@@ -1249,7 +1255,7 @@ local SAVE_NUMBERS = {
 	RadarLineThickness = { 1, 4 },
 	BGGradBright = { 10, 100 },
 	BGGradHue = { 0, 360 },
-	FOV ={ 20, 500 }, Strength = { 1, 500 }, PredictionMs = { 0, 500 }, TriggerDelay = { 0, 300 },
+	FOV ={ 20, 500 }, SilentFOV = { 20, 500 }, Strength = { 1, 500 }, PredictionMs = { 0, 500 }, TriggerDelay = { 0, 300 },
 	BlurAmount = { 1, 56 }, UITransparency = { 0, 70 }, UIScale = { 50, 150 }, FlySpeed = { 5, 1000 },
 	VortexSpeed = { 1, 100 }, VortexRadius = { 2, 60 }, SpeedValue = { 16, 250 },
 	RageDistance = { 2, 20 }, OrbitSpeed = { 1, 30 }, VoidInterval = { 10, 2000 }, VoidDistance = { 1, 10000000 }, VoidRoamMs = { 10, 2000 }, AttackInterval = { 10, 2000 }, AttackHeight = { 0, 50 }, SkyBrightness = { 0, 100 }, MouseGain = { 5, 100 },
@@ -1294,6 +1300,7 @@ local function takeSnapshot()
 		snap.settings[k] = Settings[k]
 	end
 	snap.settings.AimPart = Settings.AimPart
+	snap.settings.SilentPart = Settings.SilentPart
 	snap.settings.AimMode = Settings.AimMode
 	snap.settings.RageMode = Settings.RageMode
 	snap.settings.RageTarget = Settings.RageTarget
@@ -1325,6 +1332,7 @@ local function applySaved(d)
 		end
 	end
 	if s.AimPart == "Head" or s.AimPart == "Body" then Settings.AimPart = s.AimPart end
+	if s.SilentPart == "Head" or s.SilentPart == "Body" then Settings.SilentPart = s.SilentPart end
 	if s.AimMode == "Hold" or s.AimMode == "Toggle" then Settings.AimMode = s.AimMode end
 	if type(s.RadarCorner) == "string" then
 		local corners = { TopRight = true, TopLeft = true, BottomRight = true, BottomLeft = true, Custom = true }
@@ -4325,7 +4333,30 @@ local function addPlaceholderPage(pageName, boxTitle)
 	return page
 end
 
-addPlaceholderPage("combat_silent", "Silent Aim")
+do
+	local silentPage = newPage("combat_silent", true)
+	local g = newGroup(silentPage, 1, "Silent Aim")
+	addCheckbox(g, "Enabled", "SilentAim")
+	addCheckbox(g, "Ignore FOV", "SilentIgnoreFOV")
+	addCheckbox(g, "Visible only", "SilentVisible")
+	addSegment(g, "Target", "SilentPart", "Head", "Body")
+	addCheckbox(g, "Show FOV", "SilentShowFOV")
+	addSlider(g, "FOV", 20, 500, "SilentFOV")
+
+	local info = newGroup(silentPage, 2, "Info")
+	ConfigAPI.silentStatusLabel = addNote(info, "hooks: starting...")
+	addNote(info, "your camera moves freely, the")
+	addNote(info, "game is told you aim at the")
+	addNote(info, "head / body of the player nearest")
+	addNote(info, "your")
+	addNote(info, "screen centre")
+	addNote(info, "Ignore FOV off: only players")
+	addNote(info, "inside the FOV circle")
+	addNote(info, "(circle shows only then)")
+	addNote(info, "uses Team Check")
+	addNote(info, "needs hookmetamethod, newcclosure,")
+	addNote(info, "getnamecallmethod, checkcaller")
+end
 
 addPlaceholderPage("combat_antikatana", "Antikatana")
 
@@ -5139,7 +5170,7 @@ do
 	end
 
 	local c = newGroup(keyPage, 1, "Combat")
-	for _, id in ipairs({ "aim", "Enabled", "ShowFOV", "IgnoreFOV", "TeamCheck", "Triggerbot", "Ragebot", "VoidSpam" }) do
+	for _, id in ipairs({ "aim", "Enabled", "ShowFOV", "IgnoreFOV", "TeamCheck", "Triggerbot", "Ragebot", "VoidSpam", "SilentAim" }) do
 		addKeybindRow(c, id)
 	end
 
@@ -5853,6 +5884,177 @@ local function getTarget()
 
 	return best
 end
+
+-- ============================ SILENT AIM ============================
+-- The camera is untouched. The player nearest the screen centre has their head picked every frame,
+-- and the game's own "where is the player aiming" queries (Mouse.Hit / Mouse.Target, the mouse and
+-- camera rays, workspace raycasts) are answered with that head instead. Calls made by this script
+-- are left alone (checkcaller), so the other features keep working normally.
+do
+	local silentTarget = nil
+	ConfigAPI.silentOk = false
+
+	local function pickSilent()
+		local cam = workspace.CurrentCamera
+		if not cam then return nil end
+		local ignoreFov = Settings.SilentIgnoreFOV
+		local center = cam.ViewportSize / 2
+		local camCF = cam.CFrame
+		local myChar = LocalPlayer.Character
+		local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+		local origin = myRoot and myRoot.Position or camCF.Position
+
+		local best, bestScore = nil, ignoreFov and math.huge or Settings.SilentFOV
+		local function consider(char, plr)
+			local hum = char:FindFirstChildOfClass("Humanoid")
+			local part
+			if Settings.SilentPart == "Body" then
+				part = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+					or char:FindFirstChild("HumanoidRootPart")
+			else
+				part = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+			end
+			if not (hum and part and isAlive(char)) then return end
+			if plr then
+				if not canDamage(plr) then return end
+			elseif Settings.TeamCheck and char:FindFirstChildOfClass("ForceField") then
+				return
+			end
+			if (part.Position - origin).Magnitude > MAX_AIM_DISTANCE then return end
+
+			local score
+			if ignoreFov then
+				-- nearest to the centre of the screen = smallest angle from where the camera looks
+				-- (works for players off screen / behind you too)
+				local dir = (part.Position - camCF.Position)
+				if dir.Magnitude < 0.01 then return end
+				score = math.acos(math.clamp(camCF.LookVector:Dot(dir.Unit), -1, 1))
+			else
+				local sp, onScreen = cam:WorldToViewportPoint(part.Position)
+				if not onScreen then return end
+				score = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+			end
+			if score < bestScore and (not Settings.SilentVisible or isVisible(part, char)) then
+				best, bestScore = part, score
+			end
+		end
+
+		for _, plr in ipairs(Players:GetPlayers()) do
+			if plr ~= LocalPlayer and plr.Character then
+				consider(plr.Character, plr)
+			end
+		end
+		if Settings.TargetNPCs then
+			for _, model in ipairs(npcCache) do
+				if model.Parent then consider(model, nil) end
+			end
+		end
+		return best
+	end
+
+	-- Silent Aim's own FOV circle, fixed on the screen centre (where it measures from)
+	local silentCircle = Instance.new("Frame")
+	silentCircle.Name = "OULSilentFOV"
+	silentCircle.AnchorPoint = Vector2.new(0.5, 0.5)
+	silentCircle.BackgroundTransparency = 1
+	silentCircle.Visible = false
+	silentCircle.Parent = gui
+	Instance.new("UICorner", silentCircle).CornerRadius = UDim.new(1, 0)
+	local silentStroke = Instance.new("UIStroke", silentCircle)
+	silentStroke.Thickness = 1.5
+	silentStroke.Transparency = 0.3
+
+	track(RunService.RenderStepped:Connect(function()
+		local showCircle = Settings.SilentAim and Settings.SilentShowFOV and not Settings.SilentIgnoreFOV
+		silentCircle.Visible = showCircle
+		if showCircle then
+			local cam = workspace.CurrentCamera
+			if cam then
+				local c = cam.ViewportSize / 2
+				silentCircle.Position = UDim2.fromOffset(c.X, c.Y)
+			end
+			silentCircle.Size = UDim2.fromOffset(Settings.SilentFOV * 2, Settings.SilentFOV * 2)
+			silentStroke.Color = circleStroke.Color
+		end
+		if not Settings.SilentAim then
+			silentTarget = nil
+			return
+		end
+		silentTarget = pickSilent()
+	end))
+
+	local missing = {}
+	if type(hookmetamethod) ~= "function" then missing[#missing + 1] = "hookmetamethod" end
+	if type(newcclosure) ~= "function" then missing[#missing + 1] = "newcclosure" end
+	if type(getnamecallmethod) ~= "function" then missing[#missing + 1] = "getnamecallmethod" end
+	if type(checkcaller) ~= "function" then missing[#missing + 1] = "checkcaller" end
+
+	if #missing == 0 then
+		local ok, err = pcall(function()
+			local mouse = LocalPlayer:GetMouse()
+			local oldIndex, oldNamecall
+
+			local function active()
+				return alive and Settings.SilentAim and silentTarget and silentTarget.Parent
+			end
+
+			oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
+				if self == mouse and active() and not checkcaller() then
+					if key == "Hit" then
+						return CFrame.new(silentTarget.Position)
+					elseif key == "Target" then
+						return silentTarget
+					elseif key == "UnitRay" then
+						local o = workspace.CurrentCamera.CFrame.Position
+						return Ray.new(o, (silentTarget.Position - o).Unit)
+					end
+				end
+				return oldIndex(self, key)
+			end))
+
+			oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+				if active() and not checkcaller() then
+					local method = getnamecallmethod()
+					local tpos = silentTarget.Position
+					if self == workspace then
+						if method == "Raycast" then
+							local o, d = ...
+							if typeof(o) == "Vector3" and typeof(d) == "Vector3" and d.Magnitude > 0 then
+								return oldNamecall(self, o, (tpos - o).Unit * d.Magnitude, select(3, ...))
+							end
+						elseif method == "FindPartOnRay" or method == "FindPartOnRayWithIgnoreList"
+							or method == "FindPartOnRayWithWhitelist" then
+							local ray = ...
+							if typeof(ray) == "Ray" then
+								local o = ray.Origin
+								return oldNamecall(self, Ray.new(o, (tpos - o).Unit * ray.Direction.Magnitude), select(2, ...))
+							end
+						end
+					elseif self == workspace.CurrentCamera
+						and (method == "ViewportPointToRay" or method == "ScreenPointToRay") then
+						local o = self.CFrame.Position
+						return Ray.new(o, (tpos - o).Unit)
+					end
+				end
+				return oldNamecall(self, ...)
+			end))
+		end)
+		ConfigAPI.silentOk = ok
+		if not ok then warn("[OUL silent aim] hook failed: " .. tostring(err)) end
+	end
+
+	local lbl = ConfigAPI.silentStatusLabel
+	if lbl then
+		if ConfigAPI.silentOk then
+			lbl.Text = "hooks: ready"
+		elseif #missing > 0 then
+			lbl.Text = "hooks: missing " .. missing[1]
+		else
+			lbl.Text = "hooks: failed (see console)"
+		end
+	end
+end
+-- ========================== END SILENT AIM ==========================
 
 do
 local triggerSeenAt = nil
