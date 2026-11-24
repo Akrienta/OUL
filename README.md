@@ -6,7 +6,7 @@ Combat ---
 - Aimbot -- Prediction, Pull Strength, Fov Circle
 - Ragebot -- Above, Below, Behind - (Constantly Teleports Behind Nearest Or Selected Player)
 - TriggerBot -- Delay (ms)
-- SilentAim - (Soon)(Rivals*)
+- SilentAim - (Experimental) - (Directs All Bullets Towards The Targets Head)
 - AntiKatana - (Soon)(Rivals*)
 - VoidSpam -- Above, Below, Behind, AutoAttack, VRoam, VoidInterval, AttackInterval - (Teleports The Player A Set Distance Out Into The Void And Teleports Back To The Player After A Period Of Time)
   
