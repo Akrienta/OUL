@@ -23,6 +23,11 @@ Visuals ---
 - FullBright - (Removes All Shadows)
 - NoFog - (Removes All Haze/ Fog In The Game)
 - SkyBox - (Allows User To Set A Custom Sky Colour)
+
+Theme---
+- Gradient - (Adds A Gradient Colour Behind The Menu)
+- MenuSnow - (Adds Snow Particles Behind The Menu For Style)
+- Styles -- Basic, Modern, Classic OUL - (Changes The Menu Into Different Styles, Basic: Blocky Modern: More Rounded Classic OUL: A Mix Of The Both)
   
 Menu ---
 - Configs -- AutoLoad (Lets The User Save Settings And Then Load Them All At Once When Load Button Is Pressed)
