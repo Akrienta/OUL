@@ -2,11 +2,15 @@
 
 Universal Cheat Script For Roblox
 
+Showcase:
+
+https://youtu.be/rl1pWigJ8eU
+
 Combat ---
 - Aimbot -- Prediction, Pull Strength, Fov Circle
 - Ragebot -- Above, Below, Behind - (Constantly Teleports Behind Nearest Or Selected Player)
 - TriggerBot -- Delay (ms)
-- SilentAim - (Experimental) - (Directs All Bullets Towards The Targets Head)
+- SilentAim - (Experimental) - (Directs All Bullets Towards The Targets Head)     (Removed Until AC Bypass)
 - AntiKatana - (Soon)(Rivals*)
 - VoidSpam -- Above, Below, Behind, AutoAttack, VRoam, VoidInterval, AttackInterval - (Teleports The Player A Set Distance Out Into The Void And Teleports Back To The Player After A Period Of Time)
   
