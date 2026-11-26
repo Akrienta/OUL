@@ -4564,7 +4564,6 @@ do
 	local DRAG_SENS = 0.012   -- radians per pixel dragged
 
 	if Settings.PreviewAutoSpin == nil then Settings.PreviewAutoSpin = false end
-	if Settings.PreviewHealth == nil then Settings.PreviewHealth = 100 end
 
 	local previewPage = newPage("visuals_preview", true)
 	local group = newGroup(previewPage, 1, "ESP Preview")
@@ -5049,7 +5048,7 @@ do
 		-- health bar (left of the box)
 		if want("ESPHealth") and boxOk then
 			local h = maxY - minY
-			local pct = math.clamp(Settings.PreviewHealth / 100, 0, 1)
+			local pct = 1 -- the preview always shows a full health bar
 			hpBg.Position = UDim2.fromOffset(minX - 7, minY)
 			hpBg.Size = UDim2.fromOffset(4, h)
 			hpFill.Position = UDim2.new(0, 1, 1, -1)
@@ -5196,7 +5195,6 @@ do
 	local BLUE, BLUE_H = Color3.fromRGB(70, 90, 140), Color3.fromRGB(90, 112, 170)
 	local controls = newGroup(previewPage, 2, "Preview")
 	addCheckbox(controls, "Auto spin", "PreviewAutoSpin")
-	addSlider(controls, "Health (%)", 1, 100, "PreviewHealth")
 	addButton(controls, "Reset angle", BLUE, BLUE_H, function() yaw = 0 end)
 	addButton(controls, "Refresh model", BLUE, BLUE_H, function() dirty = true end)
 
