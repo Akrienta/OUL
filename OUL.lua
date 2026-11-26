@@ -1241,7 +1241,7 @@ local SAVE_BOOLS = {
 	"Enabled", "IgnoreFOV", "TeamCheck", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
 	"Boxes", "BoxFill", "Skeleton", "ESPHealth", "ESPDistance", "ESPWeapon", "Skybox", "SkyRainbow", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed", "Fullbright", "NoFog", "Radar", "Prediction",
 	"InfiniteJump", "Notifications", "TargetNPCs", "ESPNPCs", "MouseTP", "KeybindList", "Ragebot",
-	"RageBehind", "RageAbove", "RageBelow", "RageOrbit", "MouseAim", "VoidRoam", "VoidAutoAttack", "MenuSnow", "PreviewAutoSpin", "RageLowestHP", "VoidLowestHP", "VoidBehind", "VoidAbove", "VoidBelow", "BGGradient", "BGGradMirror",
+	"RageBehind", "RageAbove", "RageBelow", "RageOrbit", "MouseAim", "VoidRoam", "VoidAutoAttack", "MenuSnow", "PreviewAutoSpin", "PreviewChams", "PreviewDemo", "RageLowestHP", "VoidLowestHP", "VoidBehind", "VoidAbove", "VoidBelow", "BGGradient", "BGGradMirror",
 }
 local SAVE_NUMBERS = {
 	RadarRange = { 50, 1000 },
@@ -4552,6 +4552,8 @@ do
 	local DRAG_SENS = 0.012   -- radians per pixel dragged
 
 	if Settings.PreviewAutoSpin == nil then Settings.PreviewAutoSpin = false end
+	if Settings.PreviewDemo == nil then Settings.PreviewDemo = true end
+	if Settings.PreviewChams == nil then Settings.PreviewChams = false end
 	if Settings.PreviewHealth == nil then Settings.PreviewHealth = 100 end
 
 	local previewPage = newPage("visuals_preview", true)
@@ -4681,6 +4683,7 @@ do
 	local lastAspect = 0
 	local sourceLabel
 	local lastError
+	local usingDummy, remoteLoading = false, false
 
 	local function sourceNote(text)
 		if sourceLabel then sourceLabel.Text = text end
@@ -4767,15 +4770,8 @@ do
 		return cf
 	end
 
-	local function buildClone()
-		local char = LocalPlayer.Character
-		if not char then return nil end
-		local prev = char.Archivable
-		char.Archivable = true
-		local ok, clone = pcall(function() return char:Clone() end)
-		char.Archivable = prev
-		if not ok or typeof(clone) ~= "Instance" then return nil end
-
+	-- strips scripts / humanoid, puts the rig in rest pose, drops loose parts, lists the skeleton bones
+	local function prepareRig(clone)
 		local root = clone:FindFirstChild("HumanoidRootPart")
 		if not (root and root:IsA("BasePart")) then
 			clone:Destroy()
@@ -4820,6 +4816,17 @@ do
 		clone.Name = "PreviewRig"
 		clone.PrimaryPart = root
 		return clone, list
+	end
+
+	local function buildClone()
+		local char = LocalPlayer.Character
+		if not char then return nil end
+		local prev = char.Archivable
+		char.Archivable = true
+		local ok, clone = pcall(function() return char:Clone() end)
+		char.Archivable = prev
+		if not ok or typeof(clone) ~= "Instance" then return nil end
+		return prepareRig(clone)
 	end
 
 	local function setChams(on)
@@ -4924,12 +4931,40 @@ do
 			dirty = false
 			local m, b = buildClone()
 			if m then
+				usingDummy = false
 				adopt(m, b)
 				sourceNote("model: your avatar")
 			else
+				-- no usable character right now: show the dummy and try to load your real avatar by user id
 				local dm, db = buildDummy()
+				usingDummy = true
 				adopt(dm, db)
-				sourceNote("model: dummy rig")
+				sourceNote("model: dummy (loading avatar)")
+				if not remoteLoading then
+					remoteLoading = true
+					task.spawn(function()
+						local ok, hm = pcall(function()
+							return Players:CreateHumanoidModelFromUserId(LocalPlayer.UserId)
+						end)
+						remoteLoading = false
+						if not (ok and typeof(hm) == "Instance") then
+							sourceNote("model: dummy (avatar load failed)")
+							return
+						end
+						if not (alive and usingDummy) then
+							hm:Destroy()
+							return
+						end
+						local pm, pb = prepareRig(hm)
+						if pm then
+							usingDummy = false
+							adopt(pm, pb)
+							sourceNote("model: your avatar (by user id)")
+						else
+							sourceNote("model: dummy (avatar load failed)")
+						end
+					end)
+				end
 			end
 		end
 		if not model then return end
@@ -4942,10 +4977,14 @@ do
 		end
 		model:PivotTo(CFrame.Angles(0, yaw, 0))
 
-		local espOn = Settings.ESP
+		-- demo mode: every overlay is drawn over the avatar; otherwise the preview mirrors the live ESP settings
+		local demo = Settings.PreviewDemo ~= false
+		local function want(key) return demo or (Settings.ESP and Settings[key]) end
+		local espOn = demo or Settings.ESP
 		offLbl.Visible = not espOn
 
-		setChams(espOn and Settings.Chams)
+		-- the model keeps its normal look unless you turn on "Chams on model"
+		setChams(Settings.PreviewChams == true and (demo or (Settings.ESP and Settings.Chams) == true))
 		if chamsOn then
 			for _, p in ipairs(parts) do
 				if p.Color ~= ESPColors.Fill then p.Color = ESPColors.Fill end
@@ -4978,11 +5017,11 @@ do
 		boxOk = boxOk and (maxY - minY) > 2
 
 		-- box + fill
-		if espOn and Settings.Boxes and boxOk then
+		if want("Boxes") and boxOk then
 			boxFrame.Position = UDim2.fromOffset(minX, minY)
 			boxFrame.Size = UDim2.fromOffset(maxX - minX, maxY - minY)
 			boxFrame.BackgroundColor3 = ESPColors.BoxFill
-			boxFrame.BackgroundTransparency = Settings.BoxFill and 0.7 or 1
+			boxFrame.BackgroundTransparency = want("BoxFill") and 0.82 or 1
 			boxStroke.Color = ESPColors.Box
 			boxFrame.Visible = true
 		else
@@ -4990,7 +5029,7 @@ do
 		end
 
 		-- health bar (left of the box)
-		if espOn and Settings.ESPHealth and boxOk then
+		if want("ESPHealth") and boxOk then
 			local h = maxY - minY
 			local pct = math.clamp(Settings.PreviewHealth / 100, 0, 1)
 			hpBg.Position = UDim2.fromOffset(minX - 7, minY)
@@ -5004,14 +5043,14 @@ do
 		end
 
 		-- distance (top-right inside the box) and weapon name (under the box), same spots as the live ESP
-		if espOn and Settings.ESPDistance and boxOk then
+		if want("ESPDistance") and boxOk then
 			distLbl.Position = UDim2.fromOffset(maxX - 3, minY + 2)
 			distLbl.TextColor3 = ESPColors.Name
 			distLbl.Visible = true
 		else
 			distLbl.Visible = false
 		end
-		if espOn and Settings.ESPWeapon and boxOk then
+		if want("ESPWeapon") and boxOk then
 			local char = LocalPlayer.Character
 			local tool = char and char:FindFirstChildOfClass("Tool")
 			weapLbl.Text = tool and tool.Name or "Weapon"
@@ -5023,7 +5062,7 @@ do
 		end
 
 		-- name tag (2.2 studs above the head, like the live billboard)
-		if espOn and Settings.ShowNames then
+		if want("ShowNames") then
 			local head = model:FindFirstChild("Head")
 			local anchor = (head and head:IsA("BasePart")) and head.Position or (rootCF.Position + Vector3.new(0, 1.6, 0))
 			local sp = proj(anchor + Vector3.new(0, 2.2, 0))
@@ -5039,7 +5078,7 @@ do
 		end
 
 		-- tracer (from the bottom centre of the preview to the root)
-		if espOn and Settings.Tracers then
+		if want("Tracers") then
 			local sp = proj(rootCF.Position)
 			if sp then
 				placeLine(tracer, Vector2.new(W / 2, H), sp, 1.5, ESPColors.Tracer)
@@ -5051,7 +5090,7 @@ do
 		end
 
 		-- skeleton
-		local skel = espOn and Settings.Skeleton
+		local skel = want("Skeleton")
 		for i, b in ipairs(bones) do
 			local line = boneLines[i]
 			if line then
@@ -5106,7 +5145,9 @@ do
 	-- controls
 	local BLUE, BLUE_H = Color3.fromRGB(70, 90, 140), Color3.fromRGB(90, 112, 170)
 	local controls = newGroup(previewPage, 2, "Preview")
+	addCheckbox(controls, "Show all overlays", "PreviewDemo")
 	addCheckbox(controls, "Auto spin", "PreviewAutoSpin")
+	addCheckbox(controls, "Chams on model", "PreviewChams")
 	addSlider(controls, "Health (%)", 1, 100, "PreviewHealth")
 	addButton(controls, "Reset angle", BLUE, BLUE_H, function() yaw = 0 end)
 	addButton(controls, "Refresh model", BLUE, BLUE_H, function() dirty = true end)
@@ -5114,11 +5155,14 @@ do
 	local info = newGroup(previewPage, 2, "Info")
 	sourceLabel = addNote(info, "model: not built yet")
 	addNote(info, "drag the preview to rotate")
-	addNote(info, "shows what the real ESP draws")
-	addNote(info, "needs ESP on (ESP tab)")
+	addNote(info, "Show all overlays: demo of")
+	addNote(info, "every ESP overlay")
+	addNote(info, "off: mirrors your real ESP")
+	addNote(info, "settings (needs ESP on)")
 	addNote(info, "weapon: shows 'Weapon' if")
 	addNote(info, "you hold no tool here")
-	addNote(info, "chams: fill colour only here")
+	addNote(info, "chams: off by default so you")
+	addNote(info, "see the real avatar (fill only)")
 	addNote(info, "tracer starts at the bottom")
 	addNote(info, "Refresh model after respawn")
 end
