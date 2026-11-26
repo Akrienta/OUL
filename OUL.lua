@@ -1251,7 +1251,7 @@ local SAVE_BOOLS = {
 	"Enabled", "IgnoreFOV", "TeamCheck", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
 	"Boxes", "BoxFill", "Skeleton", "ESPHealth", "ESPDistance", "ESPWeapon", "Skybox", "SkyRainbow", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed", "Fullbright", "NoFog", "Radar", "Prediction",
 	"InfiniteJump", "Notifications", "TargetNPCs", "ESPNPCs", "MouseTP", "KeybindList", "Ragebot",
-	"RageBehind", "RageAbove", "RageBelow", "RageOrbit", "MouseAim", "VoidRoam", "VoidAutoAttack", "MenuSnow", "PreviewAutoSpin", "PreviewChams", "PreviewDemo", "RageLowestHP", "VoidLowestHP", "VoidBehind", "VoidAbove", "VoidBelow", "BGGradient", "BGGradMirror",
+	"RageBehind", "RageAbove", "RageBelow", "RageOrbit", "MouseAim", "VoidRoam", "VoidAutoAttack", "MenuSnow", "PreviewAutoSpin", "RageLowestHP", "VoidLowestHP", "VoidBehind", "VoidAbove", "VoidBelow", "BGGradient", "BGGradMirror",
 }
 local SAVE_NUMBERS = {
 	RadarRange = { 50, 1000 },
@@ -4562,8 +4562,6 @@ do
 	local DRAG_SENS = 0.012   -- radians per pixel dragged
 
 	if Settings.PreviewAutoSpin == nil then Settings.PreviewAutoSpin = false end
-	if Settings.PreviewDemo == nil then Settings.PreviewDemo = true end
-	if Settings.PreviewChams == nil then Settings.PreviewChams = false end
 	if Settings.PreviewHealth == nil then Settings.PreviewHealth = 100 end
 
 	local previewPage = newPage("visuals_preview", true)
@@ -4987,14 +4985,21 @@ do
 		end
 		model:PivotTo(CFrame.Angles(0, yaw, 0))
 
-		-- demo mode: every overlay is drawn over the avatar; otherwise the preview mirrors the live ESP settings
-		local demo = Settings.PreviewDemo ~= false
-		local function want(key) return demo or (Settings.ESP and Settings[key]) end
-		local espOn = demo or Settings.ESP
-		offLbl.Visible = not espOn
+		-- the preview draws only what is switched on in the ESP tab (master ESP switch included)
+		local espOn = Settings.ESP == true
+		local function want(key) return espOn and Settings[key] == true end
+		local anyOn = false
+		for _, key in ipairs({ "Boxes", "ESPHealth", "ESPDistance", "ESPWeapon", "ShowNames", "Tracers", "Skeleton", "Chams" }) do
+			if want(key) then
+				anyOn = true
+				break
+			end
+		end
+		offLbl.Text = espOn and "No ESP options enabled - turn some on in the ESP tab"
+			or "ESP is off - turn it on in the ESP tab"
+		offLbl.Visible = not anyOn
 
-		-- the model keeps its normal look unless you turn on "Chams on model"
-		setChams(Settings.PreviewChams == true and (demo or (Settings.ESP and Settings.Chams) == true))
+		setChams(want("Chams"))
 		if chamsOn then
 			for _, p in ipairs(parts) do
 				if p.Color ~= ESPColors.Fill then p.Color = ESPColors.Fill end
@@ -5125,8 +5130,18 @@ do
 		end
 	end))
 
-	-- drag to rotate (mouse or touch)
-	holder.InputBegan:Connect(function(input)
+	-- drag to rotate (mouse or touch). A transparent button on top receives the click, so the
+	-- viewport and overlay layers under it cannot swallow the input.
+	local catcher = Instance.new("TextButton")
+	catcher.Name = "DragCatcher"
+	catcher.Size = UDim2.fromScale(1, 1)
+	catcher.BackgroundTransparency = 1
+	catcher.BorderSizePixel = 0
+	catcher.Text = ""
+	catcher.AutoButtonColor = false
+	catcher.ZIndex = 10
+	catcher.Parent = holder
+	catcher.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
@@ -5155,9 +5170,7 @@ do
 	-- controls
 	local BLUE, BLUE_H = Color3.fromRGB(70, 90, 140), Color3.fromRGB(90, 112, 170)
 	local controls = newGroup(previewPage, 2, "Preview")
-	addCheckbox(controls, "Show all overlays", "PreviewDemo")
 	addCheckbox(controls, "Auto spin", "PreviewAutoSpin")
-	addCheckbox(controls, "Chams on model", "PreviewChams")
 	addSlider(controls, "Health (%)", 1, 100, "PreviewHealth")
 	addButton(controls, "Reset angle", BLUE, BLUE_H, function() yaw = 0 end)
 	addButton(controls, "Refresh model", BLUE, BLUE_H, function() dirty = true end)
@@ -5165,14 +5178,12 @@ do
 	local info = newGroup(previewPage, 2, "Info")
 	sourceLabel = addNote(info, "model: not built yet")
 	addNote(info, "drag the preview to rotate")
-	addNote(info, "Show all overlays: demo of")
-	addNote(info, "every ESP overlay")
-	addNote(info, "off: mirrors your real ESP")
-	addNote(info, "settings (needs ESP on)")
+	addNote(info, "shows only what you have")
+	addNote(info, "enabled in the ESP tab")
+	addNote(info, "(ESP master switch too)")
 	addNote(info, "weapon: shows 'Weapon' if")
 	addNote(info, "you hold no tool here")
-	addNote(info, "chams: off by default so you")
-	addNote(info, "see the real avatar (fill only)")
+	addNote(info, "chams: fill colour only here")
 	addNote(info, "tracer starts at the bottom")
 	addNote(info, "Refresh model after respawn")
 end
