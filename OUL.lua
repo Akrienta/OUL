@@ -1068,6 +1068,7 @@ local Settings = {
 	VoidAutoAttack = false,
 	MenuSnow = false,
 	SnowAngle = 0,
+	SnowSpeed = 100,
 	RageLowestHP = false,
 	VoidLowestHP = false,
 	VoidBehind = false,
@@ -1257,6 +1258,7 @@ local SAVE_BOOLS = {
 local SAVE_NUMBERS = {
 	RadarRange = { 50, 1000 },
 	SnowAngle = { -60, 60 },
+	SnowSpeed = { 10, 300 },
 	RadarSize = { 100, 300 },
 	RadarDotSize = { 4, 14 },
 	RadarX = { -1, 10000 },
@@ -5564,9 +5566,11 @@ do
 		local wind = math.tan(math.rad(math.clamp(Settings.SnowAngle or 0, -60, 60)))
 		windDrift = wind * h / math.max(w, 1)
 
+		local speedMul = math.clamp(Settings.SnowSpeed or 100, 10, 300) / 100
+
 		for _, f in ipairs(flakes) do
-			f.y += f.speed * dt
-			f.x += f.speed * windDrift * dt
+			f.y += f.speed * speedMul * dt
+			f.x += f.speed * speedMul * windDrift * dt
 			if f.y > 1.05 then respawn(f, false) end
 			local x = f.x * w + math.sin(t * f.freq + f.phase) * f.sway
 			local y = f.y * h
@@ -5644,6 +5648,7 @@ do
 	local fx = newGroup(themeStylePage, 1, "Effects")
 	addCheckbox(fx, "Menu Snow", "MenuSnow")
 	addSlider(fx, "Snow Angle (deg)", -60, 60, "SnowAngle")
+	addSlider(fx, "Snow Speed (%)", 10, 300, "SnowSpeed")
 	addNote(fx, "snow falls over the screen")
 	addNote(fx, "while the menu is open")
 	addNote(fx, "angle 0 = straight down,")
