@@ -1069,6 +1069,7 @@ local Settings = {
 	MenuSnow = false,
 	SnowAngle = 0,
 	SnowSpeed = 100,
+	ParticleType = "Snow",
 	RageLowestHP = false,
 	VoidLowestHP = false,
 	VoidBehind = false,
@@ -1315,6 +1316,7 @@ local function takeSnapshot()
 	snap.settings.RageMode = Settings.RageMode
 	snap.settings.RageTarget = Settings.RageTarget
 	snap.settings.UIStyle = Settings.UIStyle
+	snap.settings.ParticleType = Settings.ParticleType
 	snap.settings.BGGradDir = Settings.BGGradDir
 	for _, k in ipairs(SAVE_THEME) do
 		snap.theme[k] = colorToArr(Theme[k])
@@ -1343,6 +1345,7 @@ local function applySaved(d)
 	end
 	if s.AimPart == "Head" or s.AimPart == "Body" then Settings.AimPart = s.AimPart end
 	if s.AimMode == "Hold" or s.AimMode == "Toggle" then Settings.AimMode = s.AimMode end
+	if s.ParticleType == "Snow" or s.ParticleType == "Rain" then Settings.ParticleType = s.ParticleType end
 	if type(s.RadarCorner) == "string" then
 		local corners = { TopRight = true, TopLeft = true, BottomRight = true, BottomLeft = true, Custom = true }
 		if corners[s.RadarCorner] then Settings.RadarCorner = s.RadarCorner end
@@ -5499,12 +5502,14 @@ do
 end
 
 -- ============================ MENU SNOW ============================
--- Theme effect: snow falls over the whole screen while the menu is open, but never on the menu itself
+-- Theme effect: snow or rain (Settings.ParticleType) falls over the whole screen while the menu is open, but never on the menu itself
 -- (flakes are hidden while they are inside the menu's rectangle). Costs nothing when the effect is off
 -- or the menu is closed (no per-frame work, flakes hidden).
 do
 	local FLAKES = 130
 	local windDrift = 0 -- sideways drift over one full fall, as a fraction of the screen width
+	local rainMode = false
+	local SNOW_COLOR, RAIN_COLOR = Color3.fromRGB(255, 255, 255), Color3.fromRGB(190, 215, 255)
 
 	local holder = Instance.new("Frame")
 	holder.Name = "OULMenuSnow"
@@ -5520,13 +5525,23 @@ do
 		local lo, hi = math.min(0, -windDrift), math.max(1, 1 - windDrift)
 		f.x = lo + math.random() * (hi - lo)
 		f.y = anywhere and math.random() or -0.05
-		f.speed = 0.06 + math.random() * 0.10 -- fraction of the height per second
-		f.sway = 6 + math.random() * 16
+		if rainMode then
+			-- rain: fast, thin streaks that do not sway
+			f.speed = 0.7 + math.random() * 0.5 -- fraction of the height per second
+			f.sway = 0
+			f.size = math.random(1, 2)
+			f.len = 10 + math.random() * 12
+			f.alpha = 0.25 + math.random() * 0.3
+			f.frame.Size = UDim2.fromOffset(f.size, f.len)
+		else
+			f.speed = 0.06 + math.random() * 0.10 -- fraction of the height per second
+			f.sway = 6 + math.random() * 16
+			f.size = math.random(2, 5)
+			f.alpha = 0.15 + math.random() * 0.4
+			f.frame.Size = UDim2.fromOffset(f.size, f.size)
+		end
 		f.freq = 0.6 + math.random() * 1.4
 		f.phase = math.random() * math.pi * 2
-		f.size = math.random(2, 5)
-		f.alpha = 0.15 + math.random() * 0.4
-		f.frame.Size = UDim2.fromOffset(f.size, f.size)
 	end
 	for i = 1, FLAKES do
 		local fr = Instance.new("Frame")
@@ -5568,7 +5583,19 @@ do
 
 		local speedMul = math.clamp(Settings.SnowSpeed or 100, 10, 300) / 100
 
+		local wantRain = Settings.ParticleType == "Rain"
+		if wantRain ~= rainMode then
+			rainMode = wantRain
+			for _, f in ipairs(flakes) do
+				respawn(f, true)
+				f.frame.BackgroundColor3 = rainMode and RAIN_COLOR or SNOW_COLOR
+			end
+		end
+		-- rain streaks lean the same way the wind pushes them
+		local rot = rainMode and -math.clamp(Settings.SnowAngle or 0, -60, 60) or 0
+
 		for _, f in ipairs(flakes) do
+			f.frame.Rotation = rot
 			f.y += f.speed * speedMul * dt
 			f.x += f.speed * speedMul * windDrift * dt
 			if f.y > 1.05 then respawn(f, false) end
@@ -5646,11 +5673,12 @@ do
 	end
 
 	local fx = newGroup(themeStylePage, 1, "Effects")
-	addCheckbox(fx, "Menu Snow", "MenuSnow")
-	addSlider(fx, "Snow Angle (deg)", -60, 60, "SnowAngle")
-	addSlider(fx, "Snow Speed (%)", 10, 300, "SnowSpeed")
-	addNote(fx, "snow falls over the screen")
-	addNote(fx, "while the menu is open")
+	addCheckbox(fx, "Menu Particles", "MenuSnow")
+	addSegment(fx, "Type", "ParticleType", "Snow", "Rain")
+	addSlider(fx, "Particle Angle (deg)", -60, 60, "SnowAngle")
+	addSlider(fx, "Particle Speed (%)", 10, 300, "SnowSpeed")
+	addNote(fx, "snow or rain falls over the")
+	addNote(fx, "screen while the menu is open")
 	addNote(fx, "angle 0 = straight down,")
 	addNote(fx, "+ blows right, - blows left")
 
