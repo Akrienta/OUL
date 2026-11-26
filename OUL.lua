@@ -1067,6 +1067,7 @@ local Settings = {
 	VoidSpam = false,
 	VoidAutoAttack = false,
 	MenuSnow = false,
+	SnowAngle = 0,
 	RageLowestHP = false,
 	VoidLowestHP = false,
 	VoidBehind = false,
@@ -1255,6 +1256,7 @@ local SAVE_BOOLS = {
 }
 local SAVE_NUMBERS = {
 	RadarRange = { 50, 1000 },
+	SnowAngle = { -60, 60 },
 	RadarSize = { 100, 300 },
 	RadarDotSize = { 4, 14 },
 	RadarX = { -1, 10000 },
@@ -4683,7 +4685,7 @@ do
 	themeText(offLbl, true)
 
 	-- state
-	local model, bones, parts, orig, saStash = nil, {}, {}, {}, {}
+	local model, bones, parts, chamParts = nil, {}, {}, {}
 	local boneLines = {}
 	local fit = nil
 	local yaw, dragging = 0, false
@@ -4837,46 +4839,24 @@ do
 		return prepareRig(clone)
 	end
 
+	-- chams are a second, slightly larger neon copy of every part that sits on top of the normal avatar
+	-- (the layer always exists; it is only made visible or invisible)
 	local function setChams(on)
 		if chamsOn == on then return end
 		chamsOn = on
-		for _, s in ipairs(saStash) do
-			if on then
-				s.sa.Parent = nil
-			else
-				s.sa.Parent = s.parent
-			end
-		end
-		for _, p in ipairs(parts) do
-			local o = orig[p]
-			if on then
-				p.Material = Enum.Material.Neon
-				p.Transparency = math.max(o.t, 0.45)
-				if o.tex ~= nil then p.TextureID = "" end
-			else
-				p.Color, p.Material, p.Transparency = o.color, o.mat, o.t
-				if o.tex ~= nil then p.TextureID = o.tex end
-			end
+		for _, c in ipairs(chamParts) do
+			c.Transparency = on and 0.5 or 1
 		end
 	end
 
 	local function adopt(m, boneList)
 		if model then pcall(function() model:Destroy() end) end
 		model, bones = m, boneList
-		parts, orig, saStash = {}, {}, {}
+		parts, chamParts = {}, {}
 		chamsOn = false
 		for _, d in ipairs(m:GetDescendants()) do
 			if d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" and d.Transparency < 0.99 then
 				parts[#parts + 1] = d
-				orig[d] = {
-					color = d.Color, mat = d.Material, t = d.Transparency,
-					tex = d:IsA("MeshPart") and d.TextureID or nil,
-				}
-				for _, c in ipairs(d:GetChildren()) do
-					if c:IsA("SurfaceAppearance") then
-						saStash[#saStash + 1] = { sa = c, parent = d }
-					end
-				end
 			end
 		end
 		m.Parent = vpf
@@ -4892,6 +4872,29 @@ do
 			w = math.max(bsize.X, bsize.Z, 4),
 		}
 		lastAspect = 0
+
+		local layer = Instance.new("Folder")
+		layer.Name = "Chams"
+		layer.Parent = m
+		for _, p in ipairs(parts) do
+			local ok, c = pcall(function() return p:Clone() end)
+			if ok and c then
+				for _, ch in ipairs(c:GetChildren()) do
+					if not ch:IsA("DataModelMesh") then ch:Destroy() end
+				end
+				c.Name = "Cham"
+				c.Anchored = true
+				c.CanCollide = false
+				c.Material = Enum.Material.Neon
+				c.Color = ESPColors.Fill
+				c.Transparency = 1
+				if c:IsA("MeshPart") then c.TextureID = "" end
+				c.Size = p.Size * 1.06
+				c.CFrame = p.CFrame
+				c.Parent = layer
+				chamParts[#chamParts + 1] = c
+			end
+		end
 
 		for _, l in ipairs(boneLines) do l:Destroy() end
 		boneLines = {}
@@ -5001,8 +5004,8 @@ do
 
 		setChams(want("Chams"))
 		if chamsOn then
-			for _, p in ipairs(parts) do
-				if p.Color ~= ESPColors.Fill then p.Color = ESPColors.Fill end
+			for _, c in ipairs(chamParts) do
+				if c.Color ~= ESPColors.Fill then c.Color = ESPColors.Fill end
 			end
 		end
 
@@ -5141,16 +5144,38 @@ do
 	catcher.AutoButtonColor = false
 	catcher.ZIndex = 10
 	catcher.Parent = holder
+	local GuiService = game:GetService("GuiService")
+	local lastX = 0
+	local function beginDrag(x)
+		dragging = true
+		lastX = x
+	end
 	catcher.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch then
-			dragging = true
+			beginDrag(input.Position.X)
 		end
 	end)
+	-- second trigger that does not depend on which gui object receives the click:
+	-- a left click that lands inside the preview rectangle starts the drag as well
+	track(UserInputService.InputBegan:Connect(function(input)
+		if dragging or input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+		if not (menuOpen and panel.Visible and currentPage == "visuals_preview") then return end
+		local sg = holder:FindFirstAncestorOfClass("ScreenGui")
+		local inset = (sg and sg.IgnoreGuiInset) and Vector2.zero or GuiService:GetGuiInset()
+		local m = UserInputService:GetMouseLocation() - inset
+		local pos, size = holder.AbsolutePosition, holder.AbsoluteSize
+		if m.X >= pos.X and m.X <= pos.X + size.X and m.Y >= pos.Y and m.Y <= pos.Y + size.Y then
+			beginDrag(m.X)
+		end
+	end))
+	-- same input style the menu's own sliders use (input.Position), so it behaves the same way
 	track(UserInputService.InputChanged:Connect(function(input)
 		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
 			or input.UserInputType == Enum.UserInputType.Touch) then
-			yaw = (yaw + input.Delta.X * DRAG_SENS) % (math.pi * 2)
+			local x = input.Position.X
+			yaw = (yaw + (x - lastX) * DRAG_SENS) % (math.pi * 2)
+			lastX = x
 		end
 	end))
 	track(UserInputService.InputEnded:Connect(function(input)
@@ -5479,6 +5504,7 @@ end
 -- or the menu is closed (no per-frame work, flakes hidden).
 do
 	local FLAKES = 130
+	local windDrift = 0 -- sideways drift over one full fall, as a fraction of the screen width
 
 	local holder = Instance.new("Frame")
 	holder.Name = "OULMenuSnow"
@@ -5491,7 +5517,8 @@ do
 
 	local flakes = {}
 	local function respawn(f, anywhere)
-		f.x = math.random()
+		local lo, hi = math.min(0, -windDrift), math.max(1, 1 - windDrift)
+		f.x = lo + math.random() * (hi - lo)
 		f.y = anywhere and math.random() or -0.05
 		f.speed = 0.06 + math.random() * 0.10 -- fraction of the height per second
 		f.sway = 6 + math.random() * 16
@@ -5536,8 +5563,12 @@ do
 		local t = os.clock()
 		dt = math.min(dt, 0.1)
 
+		local wind = math.tan(math.rad(math.clamp(Settings.SnowAngle or 0, -60, 60)))
+		windDrift = wind * h / math.max(w, 1)
+
 		for _, f in ipairs(flakes) do
 			f.y += f.speed * dt
+			f.x += f.speed * windDrift * dt
 			if f.y > 1.05 then respawn(f, false) end
 			local x = f.x * w + math.sin(t * f.freq + f.phase) * f.sway
 			local y = f.y * h
@@ -5614,8 +5645,11 @@ do
 
 	local fx = newGroup(themeStylePage, 1, "Effects")
 	addCheckbox(fx, "Menu Snow", "MenuSnow")
+	addSlider(fx, "Snow Angle (deg)", -60, 60, "SnowAngle")
 	addNote(fx, "snow falls over the screen")
 	addNote(fx, "while the menu is open")
+	addNote(fx, "angle 0 = straight down,")
+	addNote(fx, "+ blows right, - blows left")
 
 	local m = newGroup(settingsPage, 1, "Menu")
 	local scaleToken = 0
