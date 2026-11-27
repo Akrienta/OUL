@@ -1069,6 +1069,7 @@ local Settings = {
 	MenuSnow = false,
 	SnowAngle = 0,
 	SnowSpeed = 100,
+	Rain = false,
 	ParticleType = "Snow",
 	RageLowestHP = false,
 	VoidLowestHP = false,
@@ -1252,7 +1253,7 @@ local SAVE_VERSION = 2
 
 local SAVE_BOOLS = {
 	"Enabled", "IgnoreFOV", "TeamCheck", "Triggerbot", "TriggerOnClick", "ESP", "Chams", "BlurEnabled", "ShowNames", "Tracers",
-	"Boxes", "BoxFill", "Skeleton", "ESPHealth", "ESPDistance", "ESPWeapon", "Skybox", "SkyRainbow", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed", "Fullbright", "NoFog", "Radar", "Prediction",
+	"Boxes", "BoxFill", "Skeleton", "ESPHealth", "ESPDistance", "ESPWeapon", "Skybox", "SkyRainbow", "Watermark", "ShowFOV", "Fly", "Noclip", "Speed", "Fullbright", "NoFog", "Rain", "Radar", "Prediction",
 	"InfiniteJump", "Notifications", "TargetNPCs", "ESPNPCs", "MouseTP", "KeybindList", "Ragebot",
 	"RageBehind", "RageAbove", "RageBelow", "RageOrbit", "MouseAim", "VoidRoam", "VoidAutoAttack", "MenuSnow", "PreviewAutoSpin", "RageLowestHP", "VoidLowestHP", "VoidBehind", "VoidAbove", "VoidBelow", "BGGradient", "BGGradMirror",
 }
@@ -5360,15 +5361,84 @@ do
 	addCheckbox(g, "No Fog", "NoFog", function()
 		applyWorldLighting()
 	end)
+	addCheckbox(g, "Rain", "Rain")
 
 	local info = newGroup(worldPage, 2, "Info")
 	addNote(info, "fullbright: max brightness,")
 	addNote(info, "no shadows, flat lighting")
 	addNote(info, "no fog: removes distance fog")
 	addNote(info, "and atmosphere haze")
+	addNote(info, "rain: rain streaks fall over")
+	addNote(info, "your screen (under the menu)")
 	addNote(info, "original lighting restored")
 	addNote(info, "when turned off / unloaded")
 end
+
+-- ============================ SCREEN RAIN ============================
+-- World > Rain: a full-screen layer of thin, fast rain streaks that lean slightly to the right.
+-- Near drops are longer, wider, faster and clearer than far ones, which gives the depth of the reference.
+-- It sits under the menu, takes no input, and costs nothing while the option is off (no drops are created
+-- until it is first switched on, and nothing runs per frame while it is off).
+do
+	local DROPS = 260
+	local LEAN_DEG = 4
+	local RAIN_COLOR = Color3.fromRGB(170, 185, 205)
+
+	local holder = nil
+	local drops = {}
+
+	local function respawn(d, anywhere)
+		local depth = math.random()
+		d.len = 0.016 + depth * 0.05           -- streak length, fraction of the screen height
+		d.speed = 0.9 + depth * 0.9            -- fraction of the screen height per second
+		d.x = math.random() * 1.15 - 0.1       -- starts a little left of the screen so the lean still covers it
+		d.y = anywhere and math.random() or -d.len - math.random() * 0.1
+		d.frame.Size = UDim2.new(0, depth > 0.8 and 2 or 1, d.len, 0)
+		d.frame.BackgroundTransparency = 1 - (0.14 + depth * 0.36)
+	end
+
+	local function build()
+		holder = Instance.new("Frame")
+		holder.Name = "OULScreenRain"
+		holder.Size = UDim2.fromScale(1, 1)
+		holder.BackgroundTransparency = 1
+		holder.BorderSizePixel = 0
+		holder.Active = false
+		holder.ZIndex = 0 -- same layer as the menu dim: under the menu, over the game
+		holder.Visible = false
+		holder.Parent = gui
+		for i = 1, DROPS do
+			local fr = Instance.new("Frame")
+			fr.BackgroundColor3 = RAIN_COLOR
+			fr.BorderSizePixel = 0
+			fr.Active = false
+			fr.Rotation = -LEAN_DEG
+			fr.Parent = holder
+			drops[i] = { frame = fr }
+			respawn(drops[i], true)
+		end
+	end
+
+	track(RunService.RenderStepped:Connect(function(dt)
+		if not Settings.Rain then
+			if holder and holder.Visible then holder.Visible = false end
+			return
+		end
+		if not holder then build() end
+		holder.Visible = true
+
+		local size = holder.AbsoluteSize
+		local drift = math.tan(math.rad(LEAN_DEG)) * size.Y / math.max(size.X, 1) -- fraction of the width per unit of height fallen
+		dt = math.min(dt, 0.1)
+		for _, d in ipairs(drops) do
+			d.y += d.speed * dt
+			d.x += d.speed * drift * dt
+			if d.y > 1 then respawn(d, false) end
+			d.frame.Position = UDim2.fromScale(d.x, d.y)
+		end
+	end))
+end
+-- ========================== END SCREEN RAIN ==========================
 
 do
 	local flyPage = newPage("movement_fly", true)
